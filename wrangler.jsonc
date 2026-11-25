@@ -1,0 +1,13 @@
+// 嗨唱：純靜態網站，用 Cloudflare Workers 的靜態資產服務（同 lotto-app 的部署方式）
+// ★ 部署只走 GitHub Actions（.github/workflows/deploy.yml）
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "urktv",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  "preview_urls": true,
+  "assets": {
+    "directory": "dist",
+    "not_found_handling": "single-page-application"
+  }
+}
