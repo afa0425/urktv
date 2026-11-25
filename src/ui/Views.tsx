@@ -21,7 +21,7 @@ function decodeHtml(s: string): string {
 
 // ---------- Home ----------
 
-export function Home({ onSing }: { onSing(song: Song): void }) {
+export function Home({ onSing, onMine }: { onSing(song: Song): void; onMine(): void }) {
   const t = useT();
   const cfg = useStore(settings);
   const plays = useStore(history);
@@ -120,6 +120,16 @@ export function Home({ onSing }: { onSing(song: Song): void }) {
           </button>
         </form>
         {msg && <p className={'notice ' + (msg.bad ? 'warn' : 'ok')}>{msg.text}</p>}
+      </section>
+
+      <section className="card demo-card mine-card">
+        <div>
+          <h2>{t('home.mine.title')}</h2>
+          <p className="muted">{t('home.mine.desc')}</p>
+        </div>
+        <button className="btn primary" onClick={onMine}>
+          {t('nav.mine')}
+        </button>
       </section>
 
       <section className="card demo-card">

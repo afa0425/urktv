@@ -242,3 +242,141 @@ export class SynthTransport implements Transport {
     this.ctx = null;
   }
 }
+
+// ---------- your own song, separated in the browser ----------
+
+/** Plays the backing track and the original vocal as two layers, so the vocal can be faded in and out. */
+export class LocalTransport implements Transport {
+  private ctx: AudioContext;
+  private inst: AudioBuffer;
+  private voc: AudioBuffer;
+  private instGain: GainNode;
+  private vocGain: GainNode;
+  private srcs: AudioBufferSourceNode[] = [];
+  private startedAt = 0; // ctx time when position 0 would have played
+  private pos = 0; // position while paused
+  private isPlaying = false;
+  private done = false;
+
+  constructor(inst: Float32Array[], voc: Float32Array[], vocalLevel: number) {
+    const Ctx: typeof AudioContext = window.AudioContext ?? (window as any).webkitAudioContext;
+    this.ctx = new Ctx({ latencyHint: 'interactive' });
+    this.inst = this.buffer(inst);
+    this.voc = this.buffer(voc);
+    this.instGain = this.ctx.createGain();
+    this.vocGain = this.ctx.createGain();
+    this.vocGain.gain.value = vocalLevel;
+    this.instGain.connect(this.ctx.destination);
+    this.vocGain.connect(this.ctx.destination);
+  }
+
+  private buffer(chs: Float32Array[]): AudioBuffer {
+    const b = this.ctx.createBuffer(chs.length, chs[0].length, 44100);
+    chs.forEach((c, i) => b.copyToChannel(c as Float32Array<ArrayBuffer>, i));
+    return b;
+  }
+
+  /** Swap in new tracks (after a key change) without losing the position. */
+  replace(inst: Float32Array[], voc: Float32Array[]) {
+    const was = this.isPlaying;
+    const t = this.time();
+    this.stopSources();
+    this.inst = this.buffer(inst);
+    this.voc = this.buffer(voc);
+    this.pos = t;
+    if (was) this.startAt(t);
+  }
+
+  setVocal(level: number) {
+    this.vocGain.gain.setTargetAtTime(level, this.ctx.currentTime, 0.03);
+  }
+
+  private stopSources() {
+    for (const s of this.srcs) {
+      s.onended = null;
+      try {
+        s.stop();
+      } catch {
+        /* not started */
+      }
+    }
+    this.srcs = [];
+    this.isPlaying = false;
+  }
+
+  private startAt(t: number) {
+    void this.ctx.resume();
+    const when = this.ctx.currentTime + 0.05;
+    const mk = (buf: AudioBuffer, g: GainNode) => {
+      const s = this.ctx.createBufferSource();
+      s.buffer = buf;
+      s.connect(g);
+      s.start(when, Math.max(0, t));
+      return s;
+    };
+    const a = mk(this.inst, this.instGain);
+    const b = mk(this.voc, this.vocGain);
+    a.onended = () => {
+      if (this.isPlaying && this.time() >= this.duration() - 0.1) {
+        this.isPlaying = false;
+        this.done = true;
+      }
+    };
+    this.srcs = [a, b];
+    this.startedAt = when - t;
+    this.isPlaying = true;
+    this.done = false;
+  }
+
+  time() {
+    return this.isPlaying ? Math.min(this.duration(), Math.max(0, this.ctx.currentTime - this.startedAt)) : this.pos;
+  }
+  duration() {
+    return this.inst.duration;
+  }
+  playing() {
+    return this.isPlaying && this.ctx.currentTime >= this.startedAt;
+  }
+  ended() {
+    return this.done;
+  }
+  play() {
+    if (this.isPlaying) return;
+    this.startAt(this.done ? 0 : this.pos);
+  }
+  pause() {
+    if (!this.isPlaying) return;
+    this.pos = this.time();
+    this.stopSources();
+  }
+  seek(t: number) {
+    const was = this.isPlaying;
+    this.stopSources();
+    this.pos = Math.max(0, Math.min(t, this.duration()));
+    this.done = false;
+    if (was) this.startAt(this.pos);
+  }
+  destroy() {
+    this.stopSources();
+    void this.ctx.close().catch(() => {});
+  }
+}
+
+/** UltraStar text for a chart made from your own song, so the guide can be shared or re-imported. */
+export function toUltraStar(title: string, notes: Note[]): string {
+  const bpm = 300; // 4 beats per 0.2 s: fine enough for sung notes
+  const beat = 60 / (bpm * 4);
+  const rows = [`#TITLE:${title}`, '#ARTIST:', `#BPM:${bpm}`, '#GAP:0'];
+  let line = notes[0]?.line ?? 0;
+  for (const n of notes) {
+    const b0 = Math.round(n.start / beat);
+    if (n.line !== line) {
+      rows.push(`- ${b0}`);
+      line = n.line;
+    }
+    const len = Math.max(1, Math.round((n.end - n.start) / beat));
+    rows.push(`: ${b0} ${len} ${n.midi - 60} ${n.text || '~'}`);
+  }
+  rows.push('E');
+  return rows.join('\n') + '\n';
+}

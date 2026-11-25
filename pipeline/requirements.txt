@@ -1,0 +1,16 @@
+# Python 3.11+; install PyTorch for your machine first (CUDA build on a GPU server).
+torch
+torchaudio
+audio-separator[gpu]   # use audio-separator[cpu] on a machine without an NVIDIA GPU
+audioread
+librosa
+soundfile
+matplotlib
+# SOME (note transcription) and RMVPE (pitch) run from their source repositories:
+einops
+lightning
+mido
+praat-parselmouth
+click
+pyyaml
+colorednoise

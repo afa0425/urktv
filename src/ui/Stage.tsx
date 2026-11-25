@@ -4,7 +4,9 @@ import { midiName } from '../audio/pitch';
 import { detectKind, lineAt, parseChart, type Chart } from '../core/chart';
 import { foldNear, FreeScorer, GuideScorer, type Difficulty, type Scorer, type ScoreResult } from '../core/score';
 import { charts, DEMO_ID, renameSong, settings, useStore, type Song } from '../core/store';
-import { demoChart, SynthTransport, YouTubeTransport, type Transport } from '../core/transport';
+import { demoChart, LocalTransport, SynthTransport, toUltraStar, YouTubeTransport, type Transport } from '../core/transport';
+import { runWorker } from '../separate/client';
+import { fromInt16, getLocal, isLocal, type LocalSong } from '../separate/db';
 import { useT, type I18nKey } from '../i18n';
 import { drawLane, nearestNote, type LaneState, type TracePoint } from './lane';
 
@@ -22,6 +24,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   const cfg = useStore(settings);
   const saved = useStore(charts)[song.id];
   const isDemo = song.id === DEMO_ID;
+  const own = isLocal(song.id);
 
   const [phase, setPhase] = useState<'ready' | 'live'>('ready');
   const [run, setRun] = useState(0); // bump to rebuild the player and start over
@@ -30,6 +33,13 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   const [ytErr, setYtErr] = useState<I18nKey | null>(null);
   const [chartErr, setChartErr] = useState(false);
   const [hud, setHud] = useState({ score: 0, note: '', level: 0, time: 0, dur: 0, playing: false });
+  // your own song: tracks from this browser's storage
+  const [local, setLocal] = useState<LocalSong | null>(null);
+  const [localErr, setLocalErr] = useState(false);
+  const [key, setKey] = useState(0);
+  const [keyBusy, setKeyBusy] = useState(false);
+  const [vocal, setVocal] = useState(0);
+  const base = useRef<{ inst: Float32Array[]; voc: Float32Array[] } | null>(null);
 
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -42,40 +52,63 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
 
   const chart: Chart | null = useMemo(() => {
     if (isDemo) return demoChart();
+    if (own) return local ? { title: local.title, notes: local.notes, lines: local.lines, hasPitch: local.notes.length > 0 } : null;
     if (!saved) return null;
     try {
       return parseChart(saved.raw, saved.kind);
     } catch {
       return null;
     }
-  }, [isDemo, saved?.raw, saved?.kind]);
+  }, [isDemo, own, local, saved?.raw, saved?.kind]);
   const guide = !!chart?.hasPitch;
+  const transpose = own ? key : saved?.transpose ?? 0;
 
   // Values the animation loop reads without restarting.
   const live = useRef({ chart, offset: 0, transpose: 0, latency: 0, title });
   live.current = {
     chart,
-    offset: (saved?.offsetMs ?? 0) / 1000,
-    transpose: saved?.transpose ?? 0,
+    offset: own ? 0 : (saved?.offsetMs ?? 0) / 1000,
+    transpose,
     latency: cfg.latencyMs / 1000,
     title,
   };
 
   useEffect(() => {
     const s = guide ? new GuideScorer(chart!, cfg.difficulty) : new FreeScorer();
-    if (s instanceof GuideScorer) s.transpose = saved?.transpose ?? 0;
+    if (s instanceof GuideScorer) s.transpose = transpose;
     scorer.current = s;
     trace.current = [];
   }, [chart, guide, cfg.difficulty, run]);
   useEffect(() => {
-    if (scorer.current instanceof GuideScorer) scorer.current.transpose = saved?.transpose ?? 0;
-  }, [saved?.transpose]);
+    if (scorer.current instanceof GuideScorer) scorer.current.transpose = transpose;
+  }, [transpose]);
+
+  // load your own song's tracks
+  useEffect(() => {
+    if (!own) return;
+    let off = false;
+    getLocal(song.id)
+      .then((s) => {
+        if (off) return;
+        if (!s) return setLocalErr(true);
+        base.current = { inst: fromInt16(s.inst, 2), voc: fromInt16(s.voc, 1) };
+        setTitle(s.title);
+        setLocal(s);
+      })
+      .catch(() => !off && setLocalErr(true));
+    return () => {
+      off = true;
+    };
+  }, [own, song.id]);
 
   // the player
   useEffect(() => {
     setYtErr(null);
     const host = hostRef.current!;
-    const tr: Transport = isDemo
+    if (own && !local) return;
+    const tr: Transport = own
+      ? new LocalTransport(base.current!.inst, base.current!.voc, vocal)
+      : isDemo
       ? new SynthTransport(demoChart(), () => settings.get().guideVolume)
       : new YouTubeTransport(host, song.id, {
           onTitle: (name) => {
@@ -88,10 +121,45 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
     transport.current = tr;
     return () => {
       tr.destroy();
-      if (!isDemo) host.replaceChildren();
+      if (!isDemo && !own) host.replaceChildren();
       transport.current = null;
     };
-  }, [song.id, isDemo, run]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [song.id, isDemo, own, local, run]);
+
+  const changeVocal = (v: number) => {
+    setVocal(v);
+    if (transport.current instanceof LocalTransport) transport.current.setVocal(v);
+  };
+
+  /** Key change for your own song: re-pitch the backing and the guide vocal from the originals. */
+  const changeKey = async (k: number) => {
+    if (!base.current || keyBusy || k === key) return;
+    setKeyBusy(true);
+    try {
+      const b = base.current;
+      const chans = [...b.inst, ...b.voc].map((c) => c.slice());
+      const out = await runWorker({ type: 'shift', channels: chans, semitones: k }, undefined, chans.map((c) => c.buffer)).done;
+      if (out.type === 'shifted' && transport.current instanceof LocalTransport) {
+        transport.current.replace(out.channels.slice(0, 2), out.channels.slice(2));
+        setKey(k);
+      }
+    } catch {
+      /* keep the current key */
+    } finally {
+      setKeyBusy(false);
+    }
+  };
+
+  const exportChart = () => {
+    if (!local) return;
+    const blob = new Blob([toUltraStar(local.title, local.notes)], { type: 'text/plain' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${local.title}.txt`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  };
 
   useEffect(() => () => mic.current.stop(), []);
 
@@ -256,11 +324,14 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
 
       <div className="stage-grid">
         <section className="stage-main">
-          <div className={'video ' + (isDemo ? 'video-demo' : '')}>
+          <div className={'video ' + (isDemo || own ? 'video-demo' : '')}>
             <div className="video-host" ref={hostRef} />
             {isDemo && <div className="demo-art">♪ Do · Re · Mi · Fa · Sol</div>}
+            {own && <div className="demo-art">♪ {title}</div>}
             {ytErr && <div className="overlay error">{t(ytErr)}</div>}
-            {phase === 'ready' && !ytErr && (
+            {localErr && <div className="overlay error">{t('mine.missing')}</div>}
+            {own && !local && !localErr && <div className="overlay">{t('mine.loading')}</div>}
+            {phase === 'ready' && !ytErr && (!own || local) && (
               <div className="overlay">
                 <button className="btn primary big" onClick={() => start(true)}>
                   🎤 {t('stage.start')}
@@ -370,7 +441,39 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
             )}
           </div>
 
-          {!isDemo && (
+          {own && local && (
+            <div className="card col">
+              <label className="field">
+                <span>
+                  {t('mine.vocal')} · {Math.round(vocal * 100)}%
+                </span>
+                <input type="range" min={0} max={1} step={0.05} value={vocal} onChange={(e) => changeVocal(Number(e.target.value))} />
+              </label>
+              <div className="field">
+                <span>
+                  {t('stage.key')} · {key > 0 ? '+' : ''}
+                  {key} {t('common.semitone')}
+                  {keyBusy ? ' · ' + t('mine.keyBusy') : ''}
+                </span>
+                <div className="row">
+                  <button className="btn small" disabled={keyBusy || key <= -6} onClick={() => changeKey(key - 1)}>
+                    ♭ −1
+                  </button>
+                  <button className="btn small" disabled={keyBusy || key === 0} onClick={() => changeKey(0)}>
+                    0
+                  </button>
+                  <button className="btn small" disabled={keyBusy || key >= 6} onClick={() => changeKey(key + 1)}>
+                    ♯ +1
+                  </button>
+                </div>
+              </div>
+              <button className="btn link" onClick={exportChart}>
+                {t('mine.export')}
+              </button>
+            </div>
+          )}
+
+          {!isDemo && !own && (
             <div className="card col">
               <div className="label">{t('stage.chart')}</div>
               <input

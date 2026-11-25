@@ -637,3 +637,27 @@ input[type='range'] {
     transition: none;
   }
 }
+
+/* import page */
+.import-title {
+  font-size: 1.6rem;
+}
+.drop {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  border-style: dashed;
+  min-height: 90px;
+}
+.drop.has {
+  border-style: solid;
+}
+.page.narrow input:not([type]) {
+  width: 100%;
+}
+a.btn {
+  text-decoration: none;
+  display: inline-block;
+  text-align: center;
+}

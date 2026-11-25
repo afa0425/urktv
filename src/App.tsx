@@ -1,11 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ScoreResult } from './core/score';
 import { bestOf, history, queue, recordPlay, settings, useStore, type Song } from './core/store';
 import { useT } from './i18n';
 import { Stage } from './ui/Stage';
 import { HistoryView, Home, QueueView, Result, SettingsView } from './ui/Views';
+import { MineView } from './ui/Mine';
 
-type Tab = 'home' | 'queue' | 'history' | 'settings';
+type Tab = 'home' | 'mine' | 'queue' | 'history' | 'settings';
 type View =
   | { name: Tab }
   | { name: 'stage'; song: Song; key: number }
@@ -19,6 +20,14 @@ export function App() {
   const [view, setView] = useState<View>({ name: 'home' });
 
   const sing = (song: Song) => setView({ name: 'stage', song, key: ++stageKey });
+
+  // links from the import page: #mine, #sing=local:<id>
+  useEffect(() => {
+    const h = decodeURIComponent(location.hash.slice(1));
+    if (h === 'mine') setView({ name: 'mine' });
+    else if (h.startsWith('sing=local:')) sing({ id: h.slice(5), title: '' });
+    if (h) window.history.replaceState(null, '', location.pathname + location.search);
+  }, []);
   const singFromQueue = (song: Song, index: number) => {
     queue.set((list) => list.filter((_, i) => i !== index));
     sing(song);
@@ -44,7 +53,7 @@ export function App() {
     );
   }
 
-  const tabs: Tab[] = ['home', 'queue', 'history', 'settings'];
+  const tabs: Tab[] = ['home', 'mine', 'queue', 'history', 'settings'];
   return (
     <div className="shell">
       <header className="topbar">
@@ -66,7 +75,8 @@ export function App() {
         </nav>
       </header>
       <main>
-        {view.name === 'home' && <Home onSing={sing} />}
+        {view.name === 'home' && <Home onSing={sing} onMine={() => setView({ name: 'mine' })} />}
+        {view.name === 'mine' && <MineView onSing={sing} />}
         {view.name === 'queue' && <QueueView onSing={singFromQueue} />}
         {view.name === 'history' && <HistoryView onSing={sing} />}
         {view.name === 'settings' && <SettingsView />}

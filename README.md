@@ -16,10 +16,34 @@
 - 站內搜尋（選用）：在「設定」填入自己的 YouTube Data API 金鑰後可用。
 - 繁體中文／English，桌機與手機版面。
 
+## 唱自己的歌：瀏覽器內 AI 去人聲
+
+使用者把自己的音檔（MP3、M4A、WAV、影片檔）丟進「匯入」頁，全部在他的裝置上處理，檔案不上傳：
+
+1. **分離人聲**：開源 UVR MDX-Net 模型（ONNX），用 ONNX Runtime Web 執行；有 WebGPU 用顯示卡，沒有就用多執行緒 CPU。
+2. **算出旋律**：從分離出的原唱人聲追蹤音高，切成評分用的音符（灰條）。
+3. **存在瀏覽器**：伴奏與原唱存在 IndexedDB，可在「我的歌」裡唱。
+4. **唱歌時**：原唱音量 0–100% 可調；升降 Key（不變速，伴奏、導唱、評分音符一起移）；可匯出 UltraStar 歌譜。
+
+| 選項 | 模型 | 效果 |
+| --- | --- | --- |
+| 去除全部人聲 | UVR-MDX-NET-Inst_HQ_3 | 伴奏最乾淨 |
+| 只去主唱、保留和聲 | UVR_MDXNET_KARA_2 | 像 KTV 伴唱帶，保留和聲 |
+
+實測（4 核 CPU、無顯示卡、WASM 4 執行緒）：2 分 13 秒的歌分離約 4.5 分鐘（約 0.5 倍即時）。有 WebGPU 的電腦應會快很多，尚未實測。
+
+### 部署注意
+
+- 匯入頁 `import.html` 需要跨來源隔離（COOP/COEP 標頭）才能用多執行緒；`public/_headers` 已為 Cloudflare Pages / Netlify 設定好。主頁面不隔離，否則 YouTube 播放器會被擋。
+- 模型每個 50–67MB，超過 Cloudflare Pages 的單檔上限（25MB）。請放到允許大檔與 CORS 的儲存空間（例如 Cloudflare R2），並在建置時設定 `VITE_MODEL_BASE=https://你的網址/models/`。
+- 本機開發先執行 `npm run models` 下載模型到 `public/models/`。
+- UVR 模型的授權條款上線前需確認。
+
 ## 開發
 
 ```bash
 npm install
+npm run models   # 下載 AI 去人聲模型（約 120MB，只需一次）
 npm run dev      # http://localhost:5173
 npm test         # 單元測試（音高偵測、歌譜解析、評分、連結解析）
 npm run build    # 輸出到 dist/

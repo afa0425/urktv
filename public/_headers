@@ -1,0 +1,8 @@
+# Cloudflare Pages / Netlify: cross-origin isolation for the import page only (multi-threaded AI).
+/import.html
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
+
+# The worker the import page starts must carry COEP too, or it fails to load.
+/assets/*
+  Cross-Origin-Embedder-Policy: require-corp
