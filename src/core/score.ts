@@ -9,8 +9,20 @@ export interface ScorePart {
   value: number; // 0..1
 }
 
+/** What the result screen celebrates (layered songs). */
+export interface ScoreExtras {
+  maxCombo: number;
+  highNotesHit: number;
+  highNotesTotal: number;
+  highestHit: number | null; // MIDI of the highest target note sung right
+  bestLine: { text: string; ratio: number } | null;
+  similarity: number; // 0..1 share of notes sung on pitch
+  titles: string[]; // i18n keys under result.title.*
+}
+
 export interface ScoreResult {
   mode: 'guide' | 'free';
+  extras?: ScoreExtras;
   score: number; // 0..100
   grade: string;
   parts: ScorePart[];
@@ -62,6 +74,12 @@ abstract class Base {
 // Nobody holds a pitch for 100% of a note (consonants, breaths), so this much counts as full marks.
 const FULL_NOTE = 0.75;
 
+/**
+ * KTV-style friendly curve: the raw share of notes sung right, lifted so that ordinary singing
+ * lands in the 60s-80s (100 stays 100, 0 stays 0). A low score makes nobody sing again.
+ */
+export const friendly = (raw: number) => (raw <= 0 ? 0 : 100 * Math.pow(Math.min(100, raw) / 100, 0.6));
+
 /** Scores against the melody of a chart, per note, octave-agnostic. */
 export class GuideScorer extends Base {
   transpose = 0;
@@ -95,6 +113,11 @@ export class GuideScorer extends Base {
     return { index: i, hit: ok };
   }
 
+  /** 0..1: how much of note i was sung on pitch so far. */
+  noteRatio(i: number): number {
+    return this.ratio(i);
+  }
+
   private ratio(i: number): number {
     const n = this.chart.notes[i];
     return Math.min(1, this.hit[i] / ((n.end - n.start) * FULL_NOTE));
@@ -102,7 +125,7 @@ export class GuideScorer extends Base {
 
   /** Running score over the notes reached so far (what the HUD shows while singing). */
   live(): number {
-    return this.total(true);
+    return friendly(this.total(true));
   }
 
   private total(onlySeen: boolean): number {
@@ -132,9 +155,10 @@ export class GuideScorer extends Base {
         golden += this.ratio(i);
       }
     });
-    const score = this.total(false);
+    const raw = this.total(false);
+    const score = friendly(raw);
     const parts: ScorePart[] = [
-      { key: 'pitch', value: score / 100 },
+      { key: 'pitch', value: raw / 100 },
       { key: 'notesHit', value: notes ? notesHit / notes : 0 },
     ];
     if (goldenMax) parts.push({ key: 'golden', value: golden / goldenMax });

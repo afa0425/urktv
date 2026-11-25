@@ -4,3 +4,4 @@ dist
 .DS_Store
 public/ort
 public/models
+public/catalog

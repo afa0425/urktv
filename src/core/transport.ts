@@ -59,6 +59,8 @@ function loadYouTubeApi(): Promise<any> {
 }
 
 export interface YouTubeEvents {
+  /** Picture only: the sound comes from our own tracks. */
+  muted?: boolean;
   onReady?(): void;
   onTitle?(title: string): void;
   /** 2 bad id, 5 player error, 100 removed/private, 101/150 embedding disabled, -1 API did not load */
@@ -83,9 +85,14 @@ export class YouTubeTransport implements Transport {
           videoId,
           width: '100%',
           height: '100%',
-          playerVars: { playsinline: 1, rel: 0, modestbranding: 1 },
+          playerVars: ev.muted
+            ? { playsinline: 1, rel: 0, modestbranding: 1, mute: 1, controls: 0, disablekb: 1, fs: 0, iv_load_policy: 3 }
+            : { playsinline: 1, rel: 0, modestbranding: 1 },
           events: {
-            onReady: () => ev.onReady?.(),
+            onReady: () => {
+              if (ev.muted) this.player?.mute?.();
+              ev.onReady?.();
+            },
             onStateChange: (e: any) => {
               this.state = e.data;
               const title = this.player?.getVideoData?.()?.title;
@@ -258,7 +265,12 @@ export class LocalTransport implements Transport {
   private isPlaying = false;
   private done = false;
 
-  constructor(inst: Float32Array[], voc: Float32Array[], vocalLevel: number) {
+  constructor(
+    inst: Float32Array[],
+    voc: Float32Array[],
+    vocalLevel: number,
+    private rate = 44100,
+  ) {
     const Ctx: typeof AudioContext = window.AudioContext ?? (window as any).webkitAudioContext;
     this.ctx = new Ctx({ latencyHint: 'interactive' });
     this.inst = this.buffer(inst);
@@ -271,7 +283,7 @@ export class LocalTransport implements Transport {
   }
 
   private buffer(chs: Float32Array[]): AudioBuffer {
-    const b = this.ctx.createBuffer(chs.length, chs[0].length, 44100);
+    const b = this.ctx.createBuffer(chs.length, chs[0].length, this.rate);
     chs.forEach((c, i) => b.copyToChannel(c as Float32Array<ArrayBuffer>, i));
     return b;
   }

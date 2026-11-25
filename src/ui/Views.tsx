@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { listCatalog, type CatalogEntry } from '../core/catalog';
 import { listMics } from '../audio/mic';
 import { midiName } from '../audio/pitch';
 import type { ScoreResult } from '../core/score';
@@ -81,6 +82,10 @@ export function Home({ onSing, onMine }: { onSing(song: Song): void; onMine(): v
   };
 
   const recent = library(plays).slice(0, 6);
+  const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
+  useEffect(() => {
+    void listCatalog().then(setCatalog);
+  }, []);
 
   return (
     <div className="page">
@@ -121,6 +126,29 @@ export function Home({ onSing, onMine }: { onSing(song: Song): void; onMine(): v
         </form>
         {msg && <p className={'notice ' + (msg.bad ? 'warn' : 'ok')}>{msg.text}</p>}
       </section>
+
+      {catalog.length > 0 && (
+        <section>
+          <h2>{t('home.catalog')}</h2>
+          <p className="muted small">{t('home.catalog.desc')}</p>
+          <ul className="tiles">
+            {catalog.map((c) => (
+              <li key={c.slug} className="tile">
+                {c.video ? <img className="thumb" src={thumbUrl(c.video)} alt="" loading="lazy" /> : <div className="thumb thumb-demo">♪</div>}
+                <div className="tile-title">
+                  <strong>{c.title}</strong> · {c.artist}
+                </div>
+                <div className="row between">
+                  <span className="muted small">{c.highest ? t('home.catalog.highest', { note: c.highest }) : ''}</span>
+                  <button className="btn primary small" onClick={() => onSing({ id: 'cat:' + c.slug, title: `${c.title} · ${c.artist}` })}>
+                    {t('home.sing')}
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="card demo-card mine-card">
         <div>
@@ -290,6 +318,28 @@ export function Result({ song, result, prevBest, next, onAgain, onNext, onHome }
           <p className={isBest ? 'best new' : 'best'}>
             {isBest ? t('result.newBest') : t('result.best', { n: Math.round(prevBest!) })}
           </p>
+          {result.extras && (
+            <div className="card highlights">
+              <div className="label">{t('result.titles')}</div>
+              <div className="badges">
+                {result.extras.titles.map((k) => (
+                  <span key={k} className="badge-title">
+                    🏅 {t(('result.title.' + k) as I18nKey)}
+                  </span>
+                ))}
+              </div>
+              <div className="label">{t('result.highlights')}</div>
+              <ul className="hl-list">
+                <li>{t('result.similarity', { n: Math.round(result.extras.similarity * 100) })}</li>
+                {result.extras.bestLine && <li>{t('result.bestLine', { text: result.extras.bestLine.text })}</li>}
+                {result.extras.highestHit !== null && <li>{t('result.highest', { note: midiName(result.extras.highestHit) })}</li>}
+                {result.extras.highNotesTotal > 0 && (
+                  <li>{t('result.highNotes', { hit: result.extras.highNotesHit, total: result.extras.highNotesTotal })}</li>
+                )}
+                {result.extras.maxCombo > 0 && <li>{t('result.maxCombo', { n: result.extras.maxCombo })}</li>}
+              </ul>
+            </div>
+          )}
           <div className="card parts">
             {result.parts.map((p) => (
               <div key={p.key} className="part">

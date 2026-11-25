@@ -2,11 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { MicPitch } from '../audio/mic';
 import { midiName } from '../audio/pitch';
 import { detectKind, lineAt, parseChart, type Chart } from '../core/chart';
-import { foldNear, FreeScorer, GuideScorer, type Difficulty, type Scorer, type ScoreResult } from '../core/score';
+import { foldNear, FreeScorer, GuideScorer, type Difficulty, type ScoreExtras, type Scorer, type ScoreResult } from '../core/score';
 import { charts, DEMO_ID, renameSong, settings, useStore, type Song } from '../core/store';
 import { demoChart, LocalTransport, SynthTransport, toUltraStar, YouTubeTransport, type Transport } from '../core/transport';
 import { runWorker } from '../separate/client';
-import { fromInt16, getLocal, isLocal, type LocalSong } from '../separate/db';
+import { fromInt16, getLocal, isLocal } from '../separate/db';
+import { computeHighlights, isCatalog, loadCatalog, type Layered } from '../core/catalog';
+import { drawDualLane, meanOffset, type DualState } from './dualLane';
 import { useT, type I18nKey } from '../i18n';
 import { drawLane, nearestNote, type LaneState, type TracePoint } from './lane';
 
@@ -17,6 +19,9 @@ interface Props {
   onDone(result: ScoreResult, song: Song): void;
 }
 
+const PRAISE = ['好穩！', '太強了！', '停不下來！', '神準！', '這就是實力！', '全場安靜聽你唱！', '專業級！'];
+const LINE_PRAISE = ['這句好聽！', '有味道！', '好穩！', '像原唱一樣！', '這句可以收錄了！'];
+
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
 export function Stage({ song, nextTitle, onExit, onDone }: Props) {
@@ -24,7 +29,9 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   const cfg = useStore(settings);
   const saved = useStore(charts)[song.id];
   const isDemo = song.id === DEMO_ID;
-  const own = isLocal(song.id);
+  const cat = isCatalog(song.id);
+  // layered songs: backing + original vocal as separate tracks (your own import, or the AI catalog)
+  const own = isLocal(song.id) || cat;
 
   const [phase, setPhase] = useState<'ready' | 'live'>('ready');
   const [run, setRun] = useState(0); // bump to rebuild the player and start over
@@ -34,12 +41,13 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   const [chartErr, setChartErr] = useState(false);
   const [hud, setHud] = useState({ score: 0, note: '', level: 0, time: 0, dur: 0, playing: false });
   // your own song: tracks from this browser's storage
-  const [local, setLocal] = useState<LocalSong | null>(null);
+  const [local, setLocal] = useState<Layered | null>(null);
   const [localErr, setLocalErr] = useState(false);
   const [key, setKey] = useState(0);
   const [keyBusy, setKeyBusy] = useState(false);
   const [vocal, setVocal] = useState(0);
   const base = useRef<{ inst: Float32Array[]; voc: Float32Array[] } | null>(null);
+  const video = useRef<YouTubeTransport | null>(null);
 
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -49,6 +57,19 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   const scorer = useRef<Scorer>(new FreeScorer());
   const trace = useRef<TracePoint[]>([]);
   const lane = useRef<LaneState>({ center: 60 });
+  const dual = useRef<DualState>({ center: 60 });
+  // encouragement: combo, high notes, per-line praise, gentle hints
+  const newCoach = () => ({ idx: 0, combo: 0, max: 0, highHit: new Set<number>(), lines: new Map<number, number>(), lastHint: 0, lastPraise: 0, lastHigh: 0 });
+  const coach = useRef(newCoach());
+  const [pops, setPops] = useState<{ id: number; text: string; kind: string }[]>([]);
+  const [combo, setCombo] = useState(0);
+  const popId = useRef(0);
+  const comboRef = useRef(0);
+  const pop = (text: string, kind: string) => {
+    const id = ++popId.current;
+    setPops((p) => [...p.slice(-2), { id, text, kind }]);
+    setTimeout(() => setPops((p) => p.filter((x) => x.id !== id)), 1700);
+  };
 
   const chart: Chart | null = useMemo(() => {
     if (isDemo) return demoChart();
@@ -64,8 +85,9 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   const transpose = own ? key : saved?.transpose ?? 0;
 
   // Values the animation loop reads without restarting.
-  const live = useRef({ chart, offset: 0, transpose: 0, latency: 0, title });
+  const live = useRef({ chart, offset: 0, transpose: 0, latency: 0, title, layered: local as Layered | null });
   live.current = {
+    layered: local,
     chart,
     offset: own ? 0 : (saved?.offsetMs ?? 0) / 1000,
     transpose,
@@ -78,20 +100,28 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
     if (s instanceof GuideScorer) s.transpose = transpose;
     scorer.current = s;
     trace.current = [];
+    coach.current = newCoach();
+    setCombo(0);
   }, [chart, guide, cfg.difficulty, run]);
   useEffect(() => {
     if (scorer.current instanceof GuideScorer) scorer.current.transpose = transpose;
   }, [transpose]);
 
-  // load your own song's tracks
+  // load the layered song's tracks
   useEffect(() => {
     if (!own) return;
     let off = false;
-    getLocal(song.id)
+    const load: Promise<Layered | undefined> = cat
+      ? loadCatalog(song.id.slice(4))
+      : getLocal(song.id).then((s) =>
+          s ? { title: s.title, notes: s.notes, lines: s.lines, inst: fromInt16(s.inst, 2), voc: fromInt16(s.voc, 1), rate: 44100 } : undefined,
+        );
+    load
       .then((s) => {
         if (off) return;
         if (!s) return setLocalErr(true);
-        base.current = { inst: fromInt16(s.inst, 2), voc: fromInt16(s.voc, 1) };
+        base.current = { inst: s.inst, voc: s.voc };
+        if (!s.highlights) s.highlights = computeHighlights(s.notes);
         setTitle(s.title);
         setLocal(s);
       })
@@ -99,7 +129,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
     return () => {
       off = true;
     };
-  }, [own, song.id]);
+  }, [own, cat, song.id]);
 
   // the player
   useEffect(() => {
@@ -107,7 +137,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
     const host = hostRef.current!;
     if (own && !local) return;
     const tr: Transport = own
-      ? new LocalTransport(base.current!.inst, base.current!.voc, vocal)
+      ? new LocalTransport(base.current!.inst, base.current!.voc, vocal, local!.rate)
       : isDemo
       ? new SynthTransport(demoChart(), () => settings.get().guideVolume)
       : new YouTubeTransport(host, song.id, {
@@ -119,9 +149,29 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
             setYtErr(code === 101 || code === 150 ? 'stage.yt.embed' : code === -1 ? 'stage.yt.api' : 'stage.yt.gone'),
         });
     transport.current = tr;
+    // the MV as a muted picture that follows our audio clock
+    let follow = 0;
+    if (own && local?.video) {
+      const v = local.video;
+      const yt = new YouTubeTransport(host, v.id, { muted: true, onError: () => setYtErr(null) });
+      video.current = yt;
+      follow = window.setInterval(() => {
+        const want = tr.time() + v.offset;
+        if (tr.playing()) {
+          if (!yt.playing()) yt.play();
+          if (Math.abs(yt.time() - want) > 0.3) yt.seek(want);
+        } else if (yt.playing()) {
+          yt.pause();
+          yt.seek(want);
+        }
+      }, 400);
+    }
     return () => {
+      window.clearInterval(follow);
+      video.current?.destroy();
+      video.current = null;
       tr.destroy();
-      if (!isDemo && !own) host.replaceChildren();
+      if (!isDemo) host.replaceChildren();
       transport.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -181,7 +231,40 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
     const tr = transport.current;
     tr?.pause();
     mic.current.stop();
-    onDone(scorer.current.result(), { id: song.id, title: live.current.title });
+    const res = scorer.current.result();
+    const ch = live.current.chart;
+    if (res.mode === 'guide' && ch) res.extras = extras(ch);
+    onDone(res, { id: song.id, title: live.current.title });
+  };
+  /** What to celebrate on the result screen. */
+  const extras = (ch: Chart): ScoreExtras => {
+    const c = coach.current;
+    const g = scorer.current as GuideScorer;
+    const scored = ch.notes.map((n, i) => ({ n, i })).filter(({ n }) => n.kind !== 'free');
+    const hit = scored.filter(({ i }) => g.noteRatio(i) >= 0.5);
+    const golden = scored.filter(({ n }) => n.kind === 'golden');
+    let bestLine: ScoreExtras['bestLine'] = null;
+    c.lines.forEach((ratio, li) => {
+      const text = ch.lines[li]?.text;
+      if (text && (!bestLine || ratio > bestLine.ratio)) bestLine = { text, ratio };
+    });
+    const similarity = scored.length ? hit.length / scored.length : 0;
+    const longHit = hit.filter(({ n }) => n.end - n.start >= 1).length;
+    const titles: string[] = [];
+    if (golden.length && c.highHit.size >= Math.max(1, golden.length / 2)) titles.push('high');
+    if (similarity >= 0.7) titles.push('stable');
+    if (c.max >= 15) titles.push('combo');
+    if (longHit >= 3) titles.push('long');
+    if (!titles.length) titles.push('rising');
+    return {
+      maxCombo: c.max,
+      highNotesHit: c.highHit.size,
+      highNotesTotal: golden.length,
+      highestHit: hit.length ? Math.max(...hit.map(({ n }) => n.midi + (g.transpose ?? 0))) : null,
+      bestLine,
+      similarity,
+      titles,
+    };
   };
   const finishRef = useRef(finish);
   finishRef.current = finish;
@@ -218,18 +301,75 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
         }
         tp.push({ t: tc, midi: shown, hit: r.hit });
         while (tp.length && tp[0].t < tc - 10) tp.shift();
+
+        // judge notes as they finish
+        const g = scorer.current;
+        if (g instanceof GuideScorer && notes) {
+          const c = coach.current;
+          while (c.idx < notes.length && notes[c.idx].end < tc) {
+            const i = c.idx++;
+            const n = notes[i];
+            if (n.kind === 'free') continue;
+            const ratio = g.noteRatio(i);
+            if (ratio >= 0.5) {
+              c.combo++;
+              c.max = Math.max(c.max, c.combo);
+              if (n.kind === 'golden' && !c.highHit.has(i)) {
+                c.highHit.add(i);
+                if (now - c.lastHigh > 2500) {
+                  c.lastHigh = now;
+                  pop('🔥 高音達成！', 'gold');
+                }
+              }
+              if ([5, 10, 20, 30, 50, 80, 120].includes(c.combo)) pop(`連擊 ×${c.combo}！${PRAISE[c.combo % PRAISE.length]}`, 'combo');
+            } else {
+              c.combo = 0;
+              const off = meanOffset(trace.current, n, L.transpose);
+              // only clear misses, and rarely: hints should help, not nag
+              if (off !== null && Math.abs(off) > 0.9 && now - c.lastHint > 10000) {
+                c.lastHint = now;
+                pop(off > 0 ? '再低一點點就完美了' : '再高一點點就完美了', 'hint');
+              }
+            }
+            // a line just ended: praise it if it went well
+            if (notes[c.idx]?.line !== n.line) {
+              const ln = notes.map((x, k) => ({ x, k })).filter(({ x }) => x.line === n.line && x.kind !== 'free');
+              const lr = ln.length ? ln.reduce((a, { k }) => a + g.noteRatio(k), 0) / ln.length : 0;
+              c.lines.set(n.line, lr);
+              if (lr >= 0.8 && now - c.lastPraise > 3000) {
+                c.lastPraise = now;
+                pop(LINE_PRAISE[(n.line + c.max) % LINE_PRAISE.length], 'praise');
+              }
+            }
+          }
+          if (c.combo !== comboRef.current) {
+            comboRef.current = c.combo;
+            setCombo(c.combo);
+          }
+        }
       }
 
       const ctx = cv.getContext('2d')!;
       const dpr = cv.width / Math.max(1, cv.clientWidth);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      drawLane(ctx, cv.clientWidth, cv.clientHeight, lane.current, {
-        now: tc,
-        trace: trace.current,
-        notes,
-        transpose: L.transpose,
-        live: frame.midi,
-      });
+      if (notes) {
+        drawDualLane(ctx, cv.clientWidth, cv.clientHeight, dual.current, {
+          now: tc,
+          trace: trace.current,
+          notes,
+          transpose: L.transpose,
+          curve: L.layered?.curve,
+          highlights: L.layered?.highlights,
+        });
+      } else {
+        drawLane(ctx, cv.clientWidth, cv.clientHeight, lane.current, {
+          now: tc,
+          trace: trace.current,
+          notes,
+          transpose: L.transpose,
+          live: frame.midi,
+        });
+      }
 
       if (now - lastHud > 120) {
         lastHud = now;
@@ -324,10 +464,10 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
 
       <div className="stage-grid">
         <section className="stage-main">
-          <div className={'video ' + (isDemo || own ? 'video-demo' : '')}>
+          <div className={'video ' + (isDemo || (own && !local?.video) ? 'video-demo' : '')}>
             <div className="video-host" ref={hostRef} />
             {isDemo && <div className="demo-art">♪ Do · Re · Mi · Fa · Sol</div>}
-            {own && <div className="demo-art">♪ {title}</div>}
+            {own && !local?.video && <div className="demo-art">♪ {title}</div>}
             {ytErr && <div className="overlay error">{t(ytErr)}</div>}
             {localErr && <div className="overlay error">{t('mine.missing')}</div>}
             {own && !local && !localErr && <div className="overlay">{t('mine.loading')}</div>}
@@ -363,8 +503,15 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
             )}
           </div>
 
-          <div className="lane-wrap">
+          <div className={'lane-wrap' + (guide ? ' dual' : '')}>
             <canvas ref={canvasRef} className="lane" />
+            <div className="pops" aria-live="polite">
+              {pops.map((p) => (
+                <div key={p.id} className={'pop pop-' + p.kind}>
+                  {p.text}
+                </div>
+              ))}
+            </div>
           </div>
           {micErr && <p className="notice warn">{t(micErr)}</p>}
           {!guide && <p className="notice">{t('stage.mode.free.hint')}</p>}
@@ -377,6 +524,11 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
             <div className="meter" aria-hidden="true">
               <i style={{ width: `${Math.round(hud.level * 100)}%` }} />
             </div>
+            {guide && (
+              <div className={'combo' + (combo >= 5 ? ' hot' : '')}>
+                {t('stage.combo')} ×{combo}
+              </div>
+            )}
             <div className="row between">
               <span className="label">{t('stage.note')}</span>
               <strong className="note-name">{hud.note || '–'}</strong>
