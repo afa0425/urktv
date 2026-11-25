@@ -14,3 +14,5 @@ praat-parselmouth
 click
 pyyaml
 colorednoise
+faster-whisper
+opencc-python-reimplemented
