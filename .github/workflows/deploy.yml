@@ -3,10 +3,9 @@ name: 部署
 # 推到 main 就自動：測試 → 打包 → 部署到 Cloudflare（網址 https://urktv.<帳號>.workers.dev）
 # 需要在 GitHub repo 的 Settings → Secrets and variables → Actions 設兩個秘密（和 lotto-app 同一組即可）：
 #   CLOUDFLARE_API_TOKEN、CLOUDFLARE_ACCOUNT_ID
+# ★ 目前改成只手動觸發：網站現在由 deploy/deploy.py 直接部署（含歌庫檔案），
+#   自動部署會用不含歌庫的版本蓋掉同名的 urktv。要恢復自動部署，先設好秘密並處理歌庫檔案的來源。
 on:
-  push:
-    branches: [main]
-    paths-ignore: ['**/*.md', 'pipeline/**']
   workflow_dispatch:
 
 concurrency:
