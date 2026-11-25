@@ -50,7 +50,16 @@ for b in song['breaths']:
     if t0 <= b <= (t1 or 1e9):
         ax.axvline(b - t0, color='#ffffff33', lw=1, ls=':')
 vis = [n['midi'] for n in song['notes'] if n['end'] >= t0 and (not t1 or n['start'] <= t1)] or [60]
-ax.set_ylim(min(vis) - 3, max(vis) + 3)
+lyr = song.get('lyrics')
+if lyr:
+    # each character under the notes it was given, in the colour of the line
+    plt.rcParams['font.sans-serif'] = ['Noto Sans CJK TC', 'Noto Sans CJK JP', 'WenQuanYi Zen Hei', 'WenQuanYi Zen Hei Mono', 'DejaVu Sans']
+    for li, line in enumerate(lyr['lines']):
+        for c in line['chars']:
+            if t0 <= c['start'] <= (t1 or 1e9):
+                ax.text((c['start'] + c['end']) / 2 - t0, min(vis) - 2.2, c['text'], ha='center', va='center',
+                        fontsize=11, color='#ffd27a' if li % 2 else '#ffffff')
+ax.set_ylim(min(vis) - 3.2, max(vis) + 3)
 ax.set_xlim(0, (t1 or tt[-1]) - t0)
 ax.set_yticks(range(int(min(vis)) - 2, int(max(vis)) + 3))
 ax.set_yticklabels([librosa.midi_to_note(m) for m in range(int(min(vis)) - 2, int(max(vis)) + 3)], fontsize=8)
