@@ -157,8 +157,15 @@ def transcribe(wav: Path, prompt: str) -> list[tuple[float, float, str]]:
 
     m = WhisperModel('large-v3-turbo', device='auto', compute_type='int8')
     y, _ = librosa.load(str(wav), sr=16000, mono=True)
-    segs, _ = m.transcribe(y, language='zh', word_timestamps=True, vad_filter=False, initial_prompt=prompt)
-    return [(w.start, w.end, w.word) for s in segs for w in s.words]
+    # Long songs make Whisper hallucinate (credits, "thanks for watching") and carry the error on.
+    # So: only voiced parts (VAD), every window decoded on its own, silence-hallucinations skipped.
+    segs, _ = m.transcribe(
+        y, language='zh', word_timestamps=True, initial_prompt=prompt or None,
+        vad_filter=True, vad_parameters={'min_silence_duration_ms': 700, 'speech_pad_ms': 200},
+        condition_on_previous_text=False, hallucination_silence_threshold=1.5, no_speech_threshold=0.5,
+    )
+    junk = ('感謝觀看', '感谢观看', '字幕', '訂閱', '订阅', '編曲', '编曲', '詞曲', '词曲')
+    return [(w.start, w.end, w.word) for s in segs if not any(j in s.text for j in junk) for w in s.words]
 
 
 def align_with_asr(lines: list[tuple[float, str]], notes: list[dict], words: list, window) -> dict:
@@ -202,19 +209,46 @@ def align_with_asr(lines: list[tuple[float, str]], notes: list[dict], words: lis
         j = int(np.argmin(np.abs(onsets - t)))
         return float(onsets[j]) if abs(onsets[j] - t) <= 0.25 else t
 
+    # A line is sung in one go: anchors far from the rest of their line matched a repeat of the
+    # same words elsewhere (choruses come back), so drop them before interpolating.
+    by_line: dict[int, list[int]] = {}
+    for i in anchor:
+        by_line.setdefault(lyr[i][0], []).append(i)
+    for li, idx in by_line.items():
+        if len(idx) < 3:
+            continue
+        med = float(np.median([anchor[i] for i in idx]))
+        for i in idx:
+            if abs(anchor[i] - med) > 4.0:
+                del anchor[i]
+
     times = [None] * len(lyr)
     for i, t in anchor.items():
         times[i] = snap(t)
+    # Unheard characters: estimate them from heard characters of the same line first (a line is
+    # sung in one go), and only spread across lines when the whole gap is short.
     known = [i for i in range(len(lyr)) if times[i] is not None]
+    step = 0.3  # typical time per sung character
     for i in range(len(lyr)):
         if times[i] is not None:
             continue
+        li = lyr[i][0]
         prev = max((k for k in known if k < i), default=None)
         nxt = min((k for k in known if k > i), default=None)
-        if prev is not None and nxt is not None:
+        same_prev = prev is not None and lyr[prev][0] == li
+        same_next = nxt is not None and lyr[nxt][0] == li
+        if same_prev and same_next:
             times[i] = times[prev] + (times[nxt] - times[prev]) * (i - prev) / (nxt - prev)
+        elif same_next:
+            times[i] = times[nxt] - step * (nxt - i)
+        elif same_prev:
+            times[i] = times[prev] + step * (i - prev)
+        elif prev is not None and nxt is not None and times[nxt] - times[prev] <= step * (nxt - prev) * 3:
+            times[i] = times[prev] + (times[nxt] - times[prev]) * (i - prev) / (nxt - prev)
+        elif nxt is not None:
+            times[i] = times[nxt] - step * (nxt - i)
         elif prev is not None:
-            times[i] = times[prev] + 0.3 * (i - prev)
+            times[i] = times[prev] + step * (i - prev)
         else:
             times[i] = lyr[i][1] + offset
     # lines from their characters
