@@ -3,7 +3,8 @@ import type { ScoreResult } from './core/score';
 import { bestOf, history, queue, recordPlay, settings, useStore, type Song } from './core/store';
 import { useT } from './i18n';
 import { Stage } from './ui/Stage';
-import { HistoryView, Home, QueueView, Result, SettingsView } from './ui/Views';
+import { HistoryView, QueueView, Result, SettingsView } from './ui/Views';
+import { Home } from './ui/Home';
 import { MineView } from './ui/Mine';
 
 type Tab = 'home' | 'mine' | 'queue' | 'history' | 'settings';

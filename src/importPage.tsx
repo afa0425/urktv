@@ -11,7 +11,7 @@ import './styles.css';
 const TEXT = {
   zh: {
     title: '匯入我的歌',
-    back: '← 回到嗨唱',
+    back: '← 回到 URKTV',
     lead: '選一個音檔或影片檔。AI 會在這台裝置上分離伴奏和原唱，並算出評分用的旋律；檔案不會上傳。',
     pick: '選擇檔案',
     drop: '或把檔案拖到這裡',
@@ -36,7 +36,7 @@ const TEXT = {
   },
   en: {
     title: 'Import my song',
-    back: '← Back to HiSing',
+    back: '← Back to URKTV',
     lead: 'Choose an audio or video file. The AI separates the backing track and the original vocal on this device and works out the melody for scoring. The file is not uploaded.',
     pick: 'Choose a file',
     drop: 'or drop a file here',

@@ -4,11 +4,40 @@ const TYPES = {
   css: 'text/css; charset=utf-8', json: 'application/json; charset=utf-8', wasm: 'application/wasm',
   mp3: 'audio/mpeg', png: 'image/png', svg: 'image/svg+xml', onnx: 'application/octet-stream', txt: 'text/plain; charset=utf-8',
 };
+// Private for now: HTTP Basic auth with the SITE_USER / SITE_PASS Worker secrets.
+function authorized(req, env) {
+  if (!env.SITE_PASS) return true;
+  const h = req.headers.get('authorization') || '';
+  if (!h.startsWith('Basic ')) return false;
+  let pair = '';
+  try {
+    pair = atob(h.slice(6));
+  } catch {
+    return false;
+  }
+  const i = pair.indexOf(':');
+  const user = pair.slice(0, i);
+  const pass = pair.slice(i + 1);
+  // constant-time-ish compare
+  const want = `${env.SITE_USER || 'urktv'}:${env.SITE_PASS}`;
+  const got = `${user}:${pass}`;
+  let diff = want.length ^ got.length;
+  for (let k = 0; k < Math.max(want.length, got.length); k++) diff |= (want.charCodeAt(k) || 0) ^ (got.charCodeAt(k) || 0);
+  return diff === 0;
+}
+
 export default {
   async fetch(req, env) {
+    if (!authorized(req, env)) {
+      return new Response('需要登入 / Login required', {
+        status: 401,
+        headers: { 'www-authenticate': 'Basic realm="URKTV", charset="UTF-8"', 'cache-control': 'no-store' },
+      });
+    }
     const url = new URL(req.url);
     let key = decodeURIComponent(url.pathname.replace(/^\/+/, ''));
     if (key === '' || key.endsWith('/')) key += 'index.html';
+    if (key === 'robots.txt') return new Response('User-agent: *\nDisallow: /\n', { headers: { 'content-type': 'text/plain' } });
     let { value, metadata } = await env.SITE.getWithMetadata(key, { type: 'arrayBuffer', cacheTtl: 300 });
     if (value === null && !key.includes('.')) {
       key = 'index.html';
@@ -17,7 +46,8 @@ export default {
     if (value === null) return new Response('Not found', { status: 404 });
     const ext = key.split('.').pop().toLowerCase();
     const h = new Headers({ 'content-type': TYPES[ext] || 'application/octet-stream' });
-    h.set('cache-control', key.startsWith('assets/') ? 'public, max-age=31536000, immutable' : 'public, max-age=60');
+    h.set('cache-control', key.startsWith('assets/') ? 'private, max-age=31536000, immutable' : 'private, max-age=60');
+    h.set('x-robots-tag', 'noindex, nofollow');
     if (key === 'import.html') {
       // the import page runs cross-origin isolated (multi-threaded AI)
       h.set('cross-origin-opener-policy', 'same-origin');

@@ -1,0 +1,1242 @@
+{
+ "updated": "2026-11-19",
+ "source": "KKBOX 週榜",
+ "lists": [
+  {
+   "key": "zh",
+   "label": "華語",
+   "items": [
+    {
+     "rank": 1,
+     "last": 1,
+     "title": "甲乙丙丁Strangers",
+     "artist": "李佳薇",
+     "cover": "https://i.kfs.io/album/global/295320632,0v2/fit/160x160.jpg",
+     "video": "",
+     "videoTitle": "",
+     "duration": null
+    },
+    {
+     "rank": 2,
+     "last": 2,
+     "title": "欲落未落",
+     "artist": "DIOR 大穎",
+     "cover": "https://i.kfs.io/album/global/300384035,0v2/fit/160x160.jpg",
+     "video": "XyNHhf1cklQ",
+     "videoTitle": "DIOR大穎 - 欲落未落 Almost,But Still Here - (Official MV）",
+     "duration": 260
+    },
+    {
+     "rank": 3,
+     "last": 3,
+     "title": "海嶼你",
+     "artist": "马也Crabbit",
+     "cover": "https://i.kfs.io/album/global/223493591,0v1/fit/160x160.jpg",
+     "video": "8JxX311OVes",
+     "videoTitle": "Sea Island You - Ma Ye (Crabbit) | 馬也_Crabbit - 海嶼你【动态歌词/English Subs/Pinyin】",
+     "duration": 297
+    },
+    {
+     "rank": 4,
+     "last": 81,
+     "title": "一萬零一次沉溺",
+     "artist": "李佳薇",
+     "cover": "https://i.kfs.io/album/tw/301029390,0v1/fit/160x160.jpg",
+     "video": "kL6L5zgWYik",
+     "videoTitle": "李佳薇 - 一萬零一次沉溺『愛上你 是命是病 是明知得不到的回應，是痛卻讓人上癮 是痂是你來過的痕跡。』【動態歌詞MV】",
+     "duration": 191
+    },
+    {
+     "rank": 5,
+     "last": 5,
+     "title": "沒有人像我一樣",
+     "artist": "宇宙人",
+     "cover": "https://i.kfs.io/album/global/294848912,0v1/fit/160x160.jpg",
+     "video": "dRSZhZT6r-Y",
+     "videoTitle": "Cosmos People 宇宙人 [ 沒有人像我一樣 No One Like You ] Official Music Video | 影集《欠妳的那場婚禮》主題曲",
+     "duration": 249
+    },
+    {
+     "rank": 6,
+     "last": 6,
+     "title": "離開我的依賴",
+     "artist": "王艷薇",
+     "cover": "https://i.kfs.io/album/tw/69206709,0v1/fit/160x160.jpg",
+     "video": "p13tH7Etlzc",
+     "videoTitle": "王艷薇 Evangeline -【離開我的依賴 Leaving】｜Official MV",
+     "duration": 242
+    },
+    {
+     "rank": 7,
+     "last": 7,
+     "title": "看著我的眼睛說",
+     "artist": "張遠",
+     "cover": "https://i.kfs.io/album/global/280657750,0v1/fit/160x160.jpg",
+     "video": "-OV0fHQ_tUE",
+     "videoTitle": "#張遠 《看著我的眼睛說》2025.03.31",
+     "duration": 261
+    },
+    {
+     "rank": 8,
+     "last": 8,
+     "title": "幸福在歌唱",
+     "artist": "A-Lin",
+     "cover": "https://i.kfs.io/album/global/287649251,0v3/fit/160x160.jpg",
+     "video": "jeRu6h4XbUU",
+     "videoTitle": "A-Lin《幸福在歌唱 Happiness Is Singing》Official Music Video - 電影《陽光女子合唱團》幸福版主題曲",
+     "duration": 280
+    },
+    {
+     "rank": 9,
+     "last": 14,
+     "title": "Jumping Machine",
+     "artist": "LBI利比",
+     "cover": "https://i.kfs.io/album/global/277994877,0v2/fit/160x160.jpg",
+     "video": "AQ1keoeJ3po",
+     "videoTitle": "#LBI利比 带来《跳楼机》，以醇熟嗓音演绎2025年现象级热单 | 2025美好中国新歌会 ·腾讯音乐榜样年度荣誉之夜 | TME腾讯音乐",
+     "duration": 207
+    },
+    {
+     "rank": 10,
+     "last": 9,
+     "title": "擱淺",
+     "artist": "周杰倫",
+     "cover": "https://i.kfs.io/album/tw/52025,1v3/fit/160x160.jpg",
+     "video": "YJfHuATJYsQ",
+     "videoTitle": "周杰倫 Jay Chou【擱淺 Step Aside】-Official Music Video",
+     "duration": 269
+    },
+    {
+     "rank": 11,
+     "last": 10,
+     "title": "太陽與地球",
+     "artist": "盧廣仲",
+     "cover": "https://i.kfs.io/album/global/284812128,0v5/fit/160x160.jpg",
+     "video": "i5YRIjxyJP8",
+     "videoTitle": "盧廣仲 Crowd Lu【太陽與地球 Sun & Earth】Official Video",
+     "duration": 263
+    },
+    {
+     "rank": 12,
+     "last": null,
+     "title": "我的貓會後空翻",
+     "artist": "陳華",
+     "cover": "https://i.kfs.io/album/global/300917573,0v1/fit/160x160.jpg",
+     "video": "exOumjmqCAU",
+     "videoTitle": "陳華Hua Chen【我的貓會後空翻 My Cat Does A Backflip】Official MV",
+     "duration": 199
+    },
+    {
+     "rank": 13,
+     "last": 4,
+     "title": "今夜讓我帶你高飛遠走",
+     "artist": "Various Artists",
+     "cover": "https://i.kfs.io/album/global/300388191,0v1/fit/160x160.jpg",
+     "video": "",
+     "videoTitle": "",
+     "duration": null
+    },
+    {
+     "rank": 14,
+     "last": 20,
+     "title": "晴天",
+     "artist": "周杰倫",
+     "cover": "https://i.kfs.io/album/global/23212,1v1/fit/160x160.jpg",
+     "video": "DYptgVvkVLQ",
+     "videoTitle": "周杰倫 Jay Chou【晴天 Sunny Day】-Official Music Video",
+     "duration": 319
+    },
+    {
+     "rank": 15,
+     "last": 17,
+     "title": "如果可以",
+     "artist": "韋禮安",
+     "cover": "https://i.kfs.io/album/global/142042170,2v1/fit/160x160.jpg",
+     "video": "8MG--WuNW1Y",
+     "videoTitle": "韋禮安 WeiBird《如果可以 Red Scarf》MV - 電影「月老」主題曲導演親剪音樂視角版",
+     "duration": 275
+    },
+    {
+     "rank": 16,
+     "last": 18,
+     "title": "若無你我欲去佗位",
+     "artist": "黃奇斌",
+     "cover": "https://i.kfs.io/album/global/282555295,0v2/fit/160x160.jpg",
+     "video": "",
+     "videoTitle": "",
+     "duration": null
+    },
+    {
+     "rank": 17,
+     "last": 19,
+     "title": "摯友",
+     "artist": "A-Lin",
+     "cover": "https://i.kfs.io/album/global/164614956,1v1/fit/160x160.jpg",
+     "video": "vGqpGFH3vh8",
+     "videoTitle": "A-Lin《摯友 Best Friend》Official Music Video",
+     "duration": 333
+    },
+    {
+     "rank": 18,
+     "last": 15,
+     "title": "像晴天像雨天",
+     "artist": "Various Artists",
+     "cover": "https://i.kfs.io/album/tw/278729944,0v1/fit/160x160.jpg",
+     "video": "dpAM2evUGCs",
+     "videoTitle": "Xiao Bing Chih “ I’m So Into You ” Official Music Video｜Insert Song of \" The First Frost \"",
+     "duration": 264
+    },
+    {
+     "rank": 19,
+     "last": 21,
+     "title": "有一種遺憾叫我們",
+     "artist": "于冬然",
+     "cover": "https://i.kfs.io/album/global/279996874,0v2/fit/160x160.jpg",
+     "video": "S0ZZsE_6R30",
+     "videoTitle": "于冬然單曲 |『有一种遗憾叫我们』",
+     "duration": 211
+    },
+    {
+     "rank": 20,
+     "last": 16,
+     "title": "她",
+     "artist": "Various Artists",
+     "cover": "https://i.kfs.io/album/tw/298216296,0v1/fit/160x160.jpg",
+     "video": "Dg47eNL_Usw",
+     "videoTitle": "Ella Langley - Be Her (Official Video)",
+     "duration": 218
+    }
+   ]
+  },
+  {
+   "key": "tw",
+   "label": "台語",
+   "items": [
+    {
+     "rank": 1,
+     "last": 2,
+     "title": "必巡",
+     "artist": "曾瑋中",
+     "cover": "https://i.kfs.io/album/global/195825888,0v1/fit/160x160.jpg",
+     "video": "X06y7ZuT7_Y",
+     "videoTitle": "曾瑋中『必巡』／Official Music Video／收錄在曾瑋中『總會有一工』專輯",
+     "duration": 267
+    },
+    {
+     "rank": 2,
+     "last": 1,
+     "title": "我愛你一句話",
+     "artist": "蕭秉治Xiao Bing Chih",
+     "cover": "https://i.kfs.io/album/global/299498471,0v1/fit/160x160.jpg",
+     "video": "H4dBBOBWEOs",
+     "videoTitle": "蕭秉治 Xiao Bing Chih [ 我愛你一句話 That One “I Love You\" ] feat.玖壹壹 洋蔥 Official Music Video",
+     "duration": 275
+    },
+    {
+     "rank": 3,
+     "last": 4,
+     "title": "運轉人生",
+     "artist": "邱軍",
+     "cover": "https://i.kfs.io/album/global/266926386,2v1/fit/160x160.jpg",
+     "video": "x-OinY-8bxc",
+     "videoTitle": "邱軍Kui - ‘運轉人生 Life Goes On’ Official Music Video - 影集「華麗計程車行」插曲",
+     "duration": 209
+    },
+    {
+     "rank": 4,
+     "last": 5,
+     "title": "你講的話",
+     "artist": "江蕙",
+     "cover": "https://i.kfs.io/album/global/170091105,0v1/fit/160x160.jpg",
+     "video": "JnjkleTqF5k",
+     "videoTitle": "3xfilms_江蕙遠走高飛專輯 你講的話",
+     "duration": 251
+    },
+    {
+     "rank": 5,
+     "last": 3,
+     "title": "憨膽",
+     "artist": "琳誼 Ring",
+     "cover": "https://i.kfs.io/album/global/299581824,0v2/fit/160x160.jpg",
+     "video": "V_XyRk_zqP4",
+     "videoTitle": "琳誼 Ring [ 憨膽 Dear Myself ] Official Music Video",
+     "duration": 241
+    },
+    {
+     "rank": 6,
+     "last": 6,
+     "title": "綿綿無絕期",
+     "artist": "黃奇斌",
+     "cover": "https://i.kfs.io/album/global/295417051,0v1/fit/160x160.jpg",
+     "video": "sQDBYHhCvps",
+     "videoTitle": "黃奇斌 Ng KiPin - 綿綿無絕期 Never Ending｜Official Music Video",
+     "duration": 267
+    },
+    {
+     "rank": 7,
+     "last": 7,
+     "title": "我甘願重新愛過",
+     "artist": "洋蔥",
+     "cover": "https://i.kfs.io/album/global/293565001,0v1/fit/160x160.jpg",
+     "video": "tkwD6DLp62k",
+     "videoTitle": "玖壹壹(Nine one one) 洋蔥 Onion - 我甘願重新愛過 Feat.狗柏 I’m willing to love again 官方MV首播",
+     "duration": 266
+    },
+    {
+     "rank": 8,
+     "last": 8,
+     "title": "人生的歌",
+     "artist": "黃乙玲",
+     "cover": "https://i.kfs.io/album/tw/55687,0v1/fit/160x160.jpg",
+     "video": "RYRYGxF3lvY",
+     "videoTitle": "黃乙玲 - 人生的歌(台) Official Music Video",
+     "duration": 393
+    },
+    {
+     "rank": 9,
+     "last": 9,
+     "title": "夢中的情話",
+     "artist": "江蕙",
+     "cover": "https://i.kfs.io/album/tw/44657,0v1/fit/160x160.jpg",
+     "video": "Zg3SEaYLq5Y",
+     "videoTitle": "江蕙 -夢中的情話 MENG CHUNG DE CHING HUA(Official Music Video)",
+     "duration": 287
+    },
+    {
+     "rank": 10,
+     "last": 15,
+     "title": "自信勇敢咱的名",
+     "artist": "滅火器",
+     "cover": "https://i.kfs.io/album/global/67214723,0v1/fit/160x160.jpg",
+     "video": "p-R9UqYCcYI",
+     "videoTitle": "2020小英總統競選歌曲《自信勇敢 咱的名》MV上線！ ── 滅火器Fire Ex.",
+     "duration": 254
+    },
+    {
+     "rank": 11,
+     "last": 13,
+     "title": "咱到遮就為止",
+     "artist": "黃奇斌",
+     "cover": "https://i.kfs.io/album/global/295417051,0v1/fit/160x160.jpg",
+     "video": "z_OHuXPrTBs",
+     "videoTitle": "黃奇斌 Ng KiPin - 咱到遮就為止 We Go as Far as Here｜Official Music Video",
+     "duration": 266
+    },
+    {
+     "rank": 12,
+     "last": 10,
+     "title": "心裡有針",
+     "artist": "蕭煌奇",
+     "cover": "https://i.kfs.io/album/tw/138368,0v1/fit/160x160.jpg",
+     "video": "W4dOifzE6R4",
+     "videoTitle": "蕭煌奇 Ricky Xiao -上水的花 The Most Beautiful Flower (華納official 高畫質 HD 官方完整版MV)",
+     "duration": 334
+    },
+    {
+     "rank": 13,
+     "last": 11,
+     "title": "講袂出喙的情話",
+     "artist": "許富凱",
+     "cover": "https://i.kfs.io/album/global/291369783,0v1/fit/160x160.jpg",
+     "video": "lVjGxpH2tT0",
+     "videoTitle": "許富凱 Fu Kai Hsu〈講袂出喙的情話  Words Left Unsaid〉Official Music Video",
+     "duration": 230
+    },
+    {
+     "rank": 14,
+     "last": 14,
+     "title": "棉照被",
+     "artist": "許富凱",
+     "cover": "https://i.kfs.io/album/global/8630456,0v1/fit/160x160.jpg",
+     "video": "kbMdUA-SQI8",
+     "videoTitle": "許富凱《棉照被》官方 MV",
+     "duration": 257
+    },
+    {
+     "rank": 15,
+     "last": 12,
+     "title": "無字的情批",
+     "artist": "黃乙玲",
+     "cover": "https://i.kfs.io/album/tw/46532,0v1/fit/160x160.jpg",
+     "video": "",
+     "videoTitle": "",
+     "duration": null
+    },
+    {
+     "rank": 16,
+     "last": 16,
+     "title": "心花開",
+     "artist": "李千娜",
+     "cover": "https://i.kfs.io/album/tw/3165761,1v1/fit/160x160.jpg",
+     "video": "Qd33i-OoOk4",
+     "videoTitle": "李千娜 Nana Lee – 心花開 (Official Music Video)",
+     "duration": 202
+    },
+    {
+     "rank": 17,
+     "last": 26,
+     "title": "島嶼天光",
+     "artist": "滅火器",
+     "cover": "https://i.kfs.io/album/global/68402276,0v1/fit/160x160.jpg",
+     "video": "p-R9UqYCcYI",
+     "videoTitle": "2020小英總統競選歌曲《自信勇敢 咱的名》MV上線！ ── 滅火器Fire Ex.",
+     "duration": 254
+    },
+    {
+     "rank": 18,
+     "last": 19,
+     "title": "愛到無命不知驚",
+     "artist": "王識賢",
+     "cover": "https://i.kfs.io/album/tw/46730,0v3/fit/160x160.jpg",
+     "video": "_tYLXc7BKD8",
+     "videoTitle": "王識賢《愛到無命不知驚》官方MV│金曲獎歌曲",
+     "duration": 241
+    },
+    {
+     "rank": 19,
+     "last": 21,
+     "title": "愛到才知痛",
+     "artist": "黃乙玲",
+     "cover": "https://i.kfs.io/album/tw/2481808,0v1/fit/160x160.jpg",
+     "video": "_ZQNq2KeN2A",
+     "videoTitle": "黃乙玲-愛到才知痛 音質後製版MV",
+     "duration": 276
+    },
+    {
+     "rank": 20,
+     "last": 17,
+     "title": "鹹酸苦汫",
+     "artist": "麋先生 聖皓",
+     "cover": "https://i.kfs.io/album/global/297639176,0v1/fit/160x160.jpg",
+     "video": "8eOs7Zd-690",
+     "videoTitle": "麋先生 聖皓 MIXER Sheng Hao feat. 王識賢 Shih Hsien Wang [ 鹹酸苦汫 Tastes of Life ] Official Music Video",
+     "duration": 259
+    }
+   ]
+  },
+  {
+   "key": "yue",
+   "label": "粵語",
+   "items": [
+    {
+     "rank": 1,
+     "last": 1,
+     "title": "喜歡你",
+     "artist": "G.E.M. 鄧紫棋",
+     "cover": "https://i.kfs.io/album/tw/4497341,0v1/fit/160x160.jpg",
+     "video": "4OqXWzekVw4",
+     "videoTitle": "G.E.M. 鄧紫棋 - 喜歡你 Official MV [HD]",
+     "duration": 270
+    },
+    {
+     "rank": 2,
+     "last": 2,
+     "title": "海闊天空",
+     "artist": "Beyond",
+     "cover": "https://i.kfs.io/album/global/926,1v1/fit/160x160.jpg",
+     "video": "V4GUy2EHMMs",
+     "videoTitle": "Beyond -《海闊天空》 Official MV",
+     "duration": 327
+    },
+    {
+     "rank": 3,
+     "last": null,
+     "title": "我年輕過",
+     "artist": "劉德華",
+     "cover": "https://i.kfs.io/album/global/301265731,0v1/fit/160x160.jpg",
+     "video": "eGfUFEirM9E",
+     "videoTitle": "我年輕過 - 劉德華",
+     "duration": 273
+    },
+    {
+     "rank": 4,
+     "last": 3,
+     "title": "浮誇",
+     "artist": "陳奕迅",
+     "cover": "https://i.kfs.io/album/global/109715,1v1/fit/160x160.jpg",
+     "video": "QHUNwcYPOWM",
+     "videoTitle": "陳奕迅Eason Chan - 浮誇Fu Kua  MV",
+     "duration": 296
+    },
+    {
+     "rank": 5,
+     "last": 5,
+     "title": "季候風",
+     "artist": "王菲",
+     "cover": "https://i.kfs.io/album/tw/47480,0v3/fit/160x160.jpg",
+     "video": "19pyJo0mP34",
+     "videoTitle": "王菲 Faye Wong - 季候風 Monsoon (Official Music Video)",
+     "duration": 277
+    },
+    {
+     "rank": 6,
+     "last": 4,
+     "title": "光輝歲月",
+     "artist": "Various Artists",
+     "cover": "https://i.kfs.io/album/tw/125889,0v1/fit/160x160.jpg",
+     "video": "VxkxfNEMVMs",
+     "videoTitle": "Anita Mui's 10th Anniv. Concert | Various Artists (群星): 夕陽之歌 \"Song of Sunset\"【English + Yale】",
+     "duration": 432
+    },
+    {
+     "rank": 7,
+     "last": 7,
+     "title": "富士山下",
+     "artist": "陳奕迅",
+     "cover": "https://i.kfs.io/album/global/109715,1v1/fit/160x160.jpg",
+     "video": "ghnT1uOwfrY",
+     "videoTitle": "陳奕迅 - 富士山下",
+     "duration": 252
+    },
+    {
+     "rank": 8,
+     "last": 6,
+     "title": "無賴",
+     "artist": "鄭中基",
+     "cover": "https://i.kfs.io/album/tw/91946,0v3/fit/160x160.jpg",
+     "video": "oUQ41c4gjsg",
+     "videoTitle": "鄭中基 Ronald Cheng -《無賴》Official MV (國：怪胎)",
+     "duration": 239
+    },
+    {
+     "rank": 9,
+     "last": 8,
+     "title": "你離開，我失控",
+     "artist": "黃俊榮 Amsden",
+     "cover": "https://i.kfs.io/album/global/300055445,0v3/fit/160x160.jpg",
+     "video": "VnuHHFa5c08",
+     "videoTitle": "黃俊榮 Amsden《放飛機 Bail on me》Official Music Video",
+     "duration": 218
+    },
+    {
+     "rank": 10,
+     "last": 9,
+     "title": "追",
+     "artist": "張國榮",
+     "cover": "https://i.kfs.io/album/tw/100563,0v3/fit/160x160.jpg",
+     "video": "HcSE3cQH-Ic",
+     "videoTitle": "張國榮 Leslie Cheung【追 Chase】Official Music Video",
+     "duration": 320
+    },
+    {
+     "rank": 11,
+     "last": 11,
+     "title": "暗裡著迷",
+     "artist": "劉德華",
+     "cover": "https://i.kfs.io/album/global/56677,3v1/fit/160x160.jpg",
+     "video": "",
+     "videoTitle": "",
+     "duration": null
+    },
+    {
+     "rank": 12,
+     "last": null,
+     "title": "皇后大道東",
+     "artist": "羅大佑",
+     "cover": "https://i.kfs.io/album/global/265123653,0v3/fit/160x160.jpg",
+     "video": "m9v6VIj500I",
+     "videoTitle": "羅大佑 蔣志光 - 皇后大道東 MV",
+     "duration": 252
+    },
+    {
+     "rank": 13,
+     "last": 20,
+     "title": "一起老去",
+     "artist": "薛凱琪",
+     "cover": "https://i.kfs.io/album/tw/4016207,3v1/fit/160x160.jpg",
+     "video": "xiyPfNFWirY",
+     "videoTitle": "《閨蜜》電影主題曲MV 一起老去  - 薛凱琪,陳意涵,楊子姗",
+     "duration": 232
+    },
+    {
+     "rank": 14,
+     "last": 13,
+     "title": "無間道",
+     "artist": "劉德華",
+     "cover": "https://i.kfs.io/album/global/56677,3v1/fit/160x160.jpg",
+     "video": "2I0QiX5kl18",
+     "videoTitle": "無間道 (國)－劉德華／梁朝偉",
+     "duration": 209
+    },
+    {
+     "rank": 15,
+     "last": 10,
+     "title": "真的愛妳",
+     "artist": "Beyond",
+     "cover": "https://i.kfs.io/album/tw/93499,0v3/fit/160x160.jpg",
+     "video": "n8aK_IUna_Y",
+     "videoTitle": "Beyond - 真的愛你 (Official Music Video)",
+     "duration": 262
+    },
+    {
+     "rank": 16,
+     "last": 12,
+     "title": "活著Viva",
+     "artist": "謝霆鋒",
+     "cover": "https://i.kfs.io/album/global/41797,1v1/fit/160x160.jpg",
+     "video": "tZKFGmks6hA",
+     "videoTitle": "謝霆鋒 Nicholas Tse《活著VIVA》[Official MV]",
+     "duration": 239
+    },
+    {
+     "rank": 17,
+     "last": 15,
+     "title": "極速",
+     "artist": "鄭伊健",
+     "cover": "https://i.kfs.io/album/global/139282,2v1/fit/160x160.jpg",
+     "video": "YpY9WUQyMuM",
+     "videoTitle": "鄭伊健 - 極速mv",
+     "duration": 228
+    },
+    {
+     "rank": 18,
+     "last": 16,
+     "title": "甲乙丙丁Strangers",
+     "artist": "李佳薇",
+     "cover": "https://i.kfs.io/album/global/297857958,0v3/fit/160x160.jpg",
+     "video": "",
+     "videoTitle": "",
+     "duration": null
+    },
+    {
+     "rank": 19,
+     "last": 17,
+     "title": "陀飛輪",
+     "artist": "陳奕迅",
+     "cover": "https://i.kfs.io/album/global/138369,2v1/fit/160x160.jpg",
+     "video": "URUIcYDq3_I",
+     "videoTitle": "陳奕迅 Eason Chan - 陀飛輪 (Official Music Video)",
+     "duration": 288
+    },
+    {
+     "rank": 20,
+     "last": 19,
+     "title": "曖昧",
+     "artist": "王菲",
+     "cover": "https://i.kfs.io/album/tw/47480,0v3/fit/160x160.jpg",
+     "video": "bR8u65g_t7o",
+     "videoTitle": "王菲 Faye Wong - 曖昧 (Official Music Video)",
+     "duration": 291
+    }
+   ]
+  },
+  {
+   "key": "ja",
+   "label": "日語",
+   "items": [
+    {
+     "rank": 1,
+     "last": 1,
+     "title": "Lemon",
+     "artist": "米津玄師",
+     "cover": "https://i.kfs.io/album/global/83019209,2v1/fit/160x160.jpg",
+     "video": "SX_ViT4Ra7k",
+     "videoTitle": "米津玄師  Kenshi Yonezu  - Lemon",
+     "duration": 275
+    },
+    {
+     "rank": 2,
+     "last": 2,
+     "title": "First Love",
+     "artist": "宇多田光",
+     "cover": "https://i.kfs.io/album/global/30579665,0v1/fit/160x160.jpg",
+     "video": "o1sUaVJUeB0",
+     "videoTitle": "宇多田ヒカル - First Love",
+     "duration": 258
+    },
+    {
+     "rank": 3,
+     "last": 5,
+     "title": "IRIS OUT",
+     "artist": "米津玄師",
+     "cover": "https://i.kfs.io/album/global/284683632,0v3/fit/160x160.jpg",
+     "video": "LmZD-TU96q4",
+     "videoTitle": "Kenshi Yonezu - IRIS OUT",
+     "duration": 154
+    },
+    {
+     "rank": 4,
+     "last": 4,
+     "title": "たぶん",
+     "artist": "YOASOBI",
+     "cover": "https://i.kfs.io/album/global/79505131,1v1/fit/160x160.jpg",
+     "video": "8iuLXODzL04",
+     "videoTitle": "YOASOBI「たぶん」Official Music  Video",
+     "duration": 264
+    },
+    {
+     "rank": 5,
+     "last": 6,
+     "title": "Sakihokoru Toki o Matsu no wa",
+     "artist": "藝聲",
+     "cover": "https://i.kfs.io/album/global/292418873,0v3/fit/160x160.jpg",
+     "video": "kJ56IFIF95E",
+     "videoTitle": "YESUNG 예성 '咲き誇る時を待つのは／Sakihokoru Toki o Matsu no wa' MV",
+     "duration": 256
+    },
+    {
+     "rank": 6,
+     "last": 7,
+     "title": "群青",
+     "artist": "YOASOBI",
+     "cover": "https://i.kfs.io/album/global/85196445,1v1/fit/160x160.jpg",
+     "video": "Y4nEEZwckuU",
+     "videoTitle": "YOASOBI「群青」Official Music Video",
+     "duration": 263
+    },
+    {
+     "rank": 7,
+     "last": 8,
+     "title": "夜に駆ける",
+     "artist": "YOASOBI",
+     "cover": "https://i.kfs.io/album/global/66951781,1v1/fit/160x160.jpg",
+     "video": "QdnVT22LBBs",
+     "videoTitle": "YOASOBI -「夜に駆ける」(Music Video)",
+     "duration": 259
+    },
+    {
+     "rank": 8,
+     "last": 3,
+     "title": "雲を抜け風下へ私だけ",
+     "artist": "ヨルシカ",
+     "cover": "https://i.kfs.io/album/global/299571333,0v2/fit/160x160.jpg",
+     "video": "J5-NUv2fNtk",
+     "videoTitle": "ヨルシカ - 雲を抜け風下へ私だけ（OFFICIAL VIDEO）",
+     "duration": 262
+    },
+    {
+     "rank": 9,
+     "last": 9,
+     "title": "Idol",
+     "artist": "YOASOBI",
+     "cover": "https://i.kfs.io/album/global/234991839,0v1/fit/160x160.jpg",
+     "video": "ZRtdQ81jPUQ",
+     "videoTitle": "YOASOBI「アイドル」 Official Music Video",
+     "duration": 226
+    },
+    {
+     "rank": 10,
+     "last": 10,
+     "title": "そばにいるね",
+     "artist": "Aoyama Thelma",
+     "cover": "https://i.kfs.io/album/global/3139079,1v1/fit/160x160.jpg",
+     "video": "-U23Ik4au7M",
+     "videoTitle": "青山テルマ(青山黛玛)feat.SoulJa - そばにいるね(留在我身边)(MTV音乐台 官方中文字幕版MV)",
+     "duration": 308
+    },
+    {
+     "rank": 11,
+     "last": 22,
+     "title": "JANE DOE",
+     "artist": "米津玄師",
+     "cover": "https://i.kfs.io/album/global/285004697,0v3/fit/160x160.jpg",
+     "video": "cAniBqyQopY",
+     "videoTitle": "劇場版『チェンソーマン レゼ篇』- 米津玄師, 宇多田ヒカル Kenshi Yonezu, Hikaru Utada - JANE DOE 『AMV』",
+     "duration": 233
+    },
+    {
+     "rank": 12,
+     "last": 18,
+     "title": "LOSER",
+     "artist": "米津玄師",
+     "cover": "https://i.kfs.io/album/global/83021602,2v1/fit/160x160.jpg",
+     "video": "Dx_fKPBPYUI",
+     "videoTitle": "米津玄師 - LOSER , Kenshi Yonezu",
+     "duration": 243
+    },
+    {
+     "rank": 13,
+     "last": 14,
+     "title": "怪物",
+     "artist": "YOASOBI",
+     "cover": "https://i.kfs.io/album/global/96568260,0v2/fit/160x160.jpg",
+     "video": "dy90tA3TT1c",
+     "videoTitle": "YOASOBI「怪物」Official Music Video　(YOASOBI - Monster)",
+     "duration": 209
+    },
+    {
+     "rank": 14,
+     "last": 13,
+     "title": "NIGHT DANCER",
+     "artist": "imase",
+     "cover": "https://i.kfs.io/album/global/187499743,0v1/fit/160x160.jpg",
+     "video": "kagoEGKHZvU",
+     "videoTitle": "【imase】NIGHT DANCER（MV）",
+     "duration": 211
+    },
+    {
+     "rank": 15,
+     "last": 16,
+     "title": "紅蓮華",
+     "artist": "LiSA",
+     "cover": "https://i.kfs.io/album/global/57281892,3v1/fit/160x160.jpg",
+     "video": "mWi5qWC6KBE",
+     "videoTitle": "【鬼滅之刃】【仿MV】LiSA - 紅蓮華 (中文字幕)",
+     "duration": 234
+    },
+    {
+     "rank": 16,
+     "last": 34,
+     "title": "結び",
+     "artist": "Ayumu Imazu",
+     "cover": "https://i.kfs.io/album/global/299207634,0v2/fit/160x160.jpg",
+     "video": "Gu1R9xNW7jM",
+     "videoTitle": "Ayumu Imazu - 結び [Music Video]",
+     "duration": 228
+    },
+    {
+     "rank": 17,
+     "last": 15,
+     "title": "MATADAYO",
+     "artist": "藝聲",
+     "cover": "https://i.kfs.io/album/global/299485388,0v1/fit/160x160.jpg",
+     "video": "yhcmT6gd4kQ",
+     "videoTitle": "YESUNG 예성 'Pedazos' MV",
+     "duration": 236
+    },
+    {
+     "rank": 18,
+     "last": 21,
+     "title": "革命途中",
+     "artist": "AiNA THE END",
+     "cover": "https://i.kfs.io/album/global/282004334,0v1/fit/160x160.jpg",
+     "video": "NLIGDjKBLY0",
+     "videoTitle": "アイナ・ジ・エンド / 革命道中 - On The Way [Official Music Video]（TVアニメ『ダンダダン』第2期オープニングテーマ）",
+     "duration": 218
+    },
+    {
+     "rank": 19,
+     "last": 20,
+     "title": "晩餐歌",
+     "artist": "tuki.",
+     "cover": "https://i.kfs.io/album/global/261385553,0v1/fit/160x160.jpg",
+     "video": "oZpYEEcvu5I",
+     "videoTitle": "tuki.『Bansanka』Official Music Video",
+     "duration": 220
+    },
+    {
+     "rank": 20,
+     "last": 12,
+     "title": "満ちてゆく",
+     "artist": "藤井風",
+     "cover": "https://i.kfs.io/album/global/267619469,0v1/fit/160x160.jpg",
+     "video": "ptiK8U4WlSc",
+     "videoTitle": "藤井 風 - 満ちてゆく Official Video",
+     "duration": 362
+    }
+   ]
+  },
+  {
+   "key": "en",
+   "label": "西洋",
+   "items": [
+    {
+     "rank": 1,
+     "last": 3,
+     "title": "Hong Kong",
+     "artist": "The Weeknd",
+     "cover": "https://i.kfs.io/album/global/300832471,0v3/fit/160x160.jpg",
+     "video": "hX9S94XsySk",
+     "videoTitle": "The Weeknd - Hong Kong (feat. 王菲季候風) (Official Music Video)",
+     "duration": 223
+    },
+    {
+     "rank": 2,
+     "last": 1,
+     "title": "ADDICTED",
+     "artist": "JISOO",
+     "cover": "https://i.kfs.io/album/global/300570104,0v2/fit/160x160.jpg",
+     "video": "Pksr9T8m_aA",
+     "videoTitle": "JISOO - ADDICTED (Official MV)",
+     "duration": 180
+    },
+    {
+     "rank": 3,
+     "last": 2,
+     "title": "APT.",
+     "artist": "ROSÉ",
+     "cover": "https://i.kfs.io/album/global/275491182,2v1/fit/160x160.jpg",
+     "video": "ekr2nIex040",
+     "videoTitle": "ROSÉ & Bruno Mars - APT. (Official Music Video)",
+     "duration": 174
+    },
+    {
+     "rank": 4,
+     "last": 8,
+     "title": "SWIM",
+     "artist": "BTS防彈少年團",
+     "cover": "https://i.kfs.io/album/global/291366347,0v2/fit/160x160.jpg",
+     "video": "b4iVv91Z6lY",
+     "videoTitle": "BTS (방탄소년단) ‘SWIM’ Official MV",
+     "duration": 245
+    },
+    {
+     "rank": 5,
+     "last": 4,
+     "title": "Training Season",
+     "artist": "Dua Lipa",
+     "cover": "https://i.kfs.io/album/global/266883828,3v1/fit/160x160.jpg",
+     "video": "ZjBZ8MUnB0E",
+     "videoTitle": "Dua Lipa - Training Season (Official Music Video)",
+     "duration": 227
+    },
+    {
+     "rank": 6,
+     "last": 5,
+     "title": "Tarantino",
+     "artist": "LISA",
+     "cover": "https://i.kfs.io/album/global/300336723,0v3/fit/160x160.jpg",
+     "video": "-5ZXrO_lYSA",
+     "videoTitle": "LISA - Tarantino (Official Music Video)",
+     "duration": 217
+    },
+    {
+     "rank": 7,
+     "last": 20,
+     "title": "DEPENDS",
+     "artist": "XG",
+     "cover": "https://i.kfs.io/album/global/299638983,0v3/fit/160x160.jpg",
+     "video": "ftDNJhhJ22k",
+     "videoTitle": "XG - DEPENDS (Official Music Video)",
+     "duration": 214
+    },
+    {
+     "rank": 8,
+     "last": 7,
+     "title": "Less than a Lover",
+     "artist": "JENNIE",
+     "cover": "https://i.kfs.io/album/global/296314901,0v3/fit/160x160.jpg",
+     "video": "_IT83Y_HcAw",
+     "videoTitle": "JENNIE - Less than a Lover (Official Video)",
+     "duration": 219
+    },
+    {
+     "rank": 9,
+     "last": 10,
+     "title": "Zoo",
+     "artist": "Disney",
+     "cover": "https://i.kfs.io/album/global/286646702,0v1/fit/160x160.jpg",
+     "video": "Kw3935PH01E",
+     "videoTitle": "Shakira - Zoo (From \"Zootopia 2\") Official Music Video",
+     "duration": 198
+    },
+    {
+     "rank": 10,
+     "last": 9,
+     "title": "WATCH ME",
+     "artist": "K/DA",
+     "cover": "https://i.kfs.io/album/global/300356112,0v1/fit/160x160.jpg",
+     "video": "3VTkBuxU4yk",
+     "videoTitle": "K/DA - MORE ft. Madison Beer, (G)I-DLE, Lexie Liu, Jaira Burns, Seraphine (Official Music Video)",
+     "duration": 231
+    },
+    {
+     "rank": 11,
+     "last": 12,
+     "title": "Something Just Like This",
+     "artist": "The Chainsmokers",
+     "cover": "https://i.kfs.io/album/global/23004839,2v1/fit/160x160.jpg",
+     "video": "k78gOa3lCsc",
+     "videoTitle": "The Chainsmokers & Coldplay Something Just Like This Animated Music Video",
+     "duration": 243
+    },
+    {
+     "rank": 12,
+     "last": 11,
+     "title": "SaWaDiKa",
+     "artist": "LISA",
+     "cover": "https://i.kfs.io/album/global/298250501,0v4/fit/160x160.jpg",
+     "video": "FyS5dAywkEo",
+     "videoTitle": "LISA - SaWaDiKa (Official Music Video)",
+     "duration": 187
+    },
+    {
+     "rank": 13,
+     "last": 21,
+     "title": "Way Back Home",
+     "artist": "SHAUN",
+     "cover": "https://i.kfs.io/album/global/44459672,1v1/fit/160x160.jpg",
+     "video": "eNt78mQJavY",
+     "videoTitle": "SHAUN – Way Back Home (feat. Conor Maynard) [Sam Feldt Edit] (Official Lyric Video)",
+     "duration": 200
+    },
+    {
+     "rank": 14,
+     "last": 15,
+     "title": "MISS ME",
+     "artist": "keshi",
+     "cover": "https://i.kfs.io/album/global/300077246,0v2/fit/160x160.jpg",
+     "video": "8PZmhXJc2-I",
+     "videoTitle": "keshi - MISS ME (Official Visualizer)",
+     "duration": 199
+    },
+    {
+     "rank": 15,
+     "last": 13,
+     "title": "Love Story",
+     "artist": "Taylor Swift",
+     "cover": "https://i.kfs.io/album/tw/124243,0v3/fit/160x160.jpg",
+     "video": "GtjGLR64IBc",
+     "videoTitle": "Taylor Swift - Love Story (Taylor's Version) (Music Video 4K)",
+     "duration": 244
+    },
+    {
+     "rank": 16,
+     "last": 19,
+     "title": "STAY",
+     "artist": "The Kid LAROI",
+     "cover": "https://i.kfs.io/album/global/126432819,2v1/fit/160x160.jpg",
+     "video": "kTJczUoc26U",
+     "videoTitle": "The Kid LAROI, Justin Bieber - STAY (Official Video)",
+     "duration": 158
+    },
+    {
+     "rank": 17,
+     "last": 16,
+     "title": "Shape of You",
+     "artist": "Ed Sheeran",
+     "cover": "https://i.kfs.io/album/global/21672225,1v1/fit/160x160.jpg",
+     "video": "JGwWNGJdvx8",
+     "videoTitle": "Ed Sheeran - Shape of You (Official Music Video)",
+     "duration": 264
+    },
+    {
+     "rank": 18,
+     "last": 55,
+     "title": "Like Animals",
+     "artist": "BTS防彈少年團",
+     "cover": "https://i.kfs.io/album/global/291366347,0v2/fit/160x160.jpg",
+     "video": "iPxnYZVtjiY",
+     "videoTitle": "BTS (방탄소년단) 'Like Animals' MV",
+     "duration": 192
+    },
+    {
+     "rank": 19,
+     "last": 18,
+     "title": "like JENNIE",
+     "artist": "JENNIE",
+     "cover": "https://i.kfs.io/album/global/279094116,3v2/fit/160x160.jpg",
+     "video": "JSFG-IE8n_c",
+     "videoTitle": "JENNIE - like JENNIE (Official Video)",
+     "duration": 183
+    },
+    {
+     "rank": 20,
+     "last": 67,
+     "title": "Butter",
+     "artist": "BTS防彈少年團",
+     "cover": "https://i.kfs.io/album/global/147020654,0v1/fit/160x160.jpg",
+     "video": "WMweEpGlu_U",
+     "videoTitle": "BTS (방탄소년단) 'Butter' Official MV",
+     "duration": 183
+    }
+   ]
+  },
+  {
+   "key": "ko",
+   "label": "韓語",
+   "items": [
+    {
+     "rank": 1,
+     "last": 2,
+     "title": "연애의 조건",
+     "artist": "BESTiE",
+     "cover": "https://i.kfs.io/album/global/17171315,0v1/fit/160x160.jpg",
+     "video": "NPqtL1dtrlA",
+     "videoTitle": "[MV] BESTie(베스티) _ Love Options(연애의 조건)",
+     "duration": 196
+    },
+    {
+     "rank": 2,
+     "last": 1,
+     "title": "NEON",
+     "artist": "A2O",
+     "cover": "https://i.kfs.io/album/global/299625872,0v1/fit/160x160.jpg",
+     "video": "G_ej20-QWng",
+     "videoTitle": "A2O LITE 'NEON' INFINITE Music Video",
+     "duration": 233
+    },
+    {
+     "rank": 3,
+     "last": 3,
+     "title": "I’m gonna TOESA",
+     "artist": "SOYEON",
+     "cover": "https://i.kfs.io/album/global/298362640,0v1/fit/160x160.jpg",
+     "video": "7mDDM0eBWR0",
+     "videoTitle": "소연 (SOYEON) '퇴사할게여 (Narr. 기안84)' Official Music Video",
+     "duration": 212
+    },
+    {
+     "rank": 4,
+     "last": 5,
+     "title": "BAD",
+     "artist": "ATEEZ",
+     "cover": "https://i.kfs.io/album/global/293822642,0v3/fit/160x160.jpg",
+     "video": "-q_S27LbNKU",
+     "videoTitle": "ATEEZ(에이티즈) - 'BAD' Official MV",
+     "duration": 225
+    },
+    {
+     "rank": 5,
+     "last": 4,
+     "title": "Looks Can Kill",
+     "artist": "IVE",
+     "cover": "https://i.kfs.io/album/global/300450747,0v2/fit/160x160.jpg",
+     "video": "rsNhWkC4neE",
+     "videoTitle": "IVE 아이브 'Looks Can Kill' MV",
+     "duration": 243
+    },
+    {
+     "rank": 6,
+     "last": 6,
+     "title": "Good Goodbye",
+     "artist": "華莎",
+     "cover": "https://i.kfs.io/album/global/285821457,0v1/fit/160x160.jpg",
+     "video": "Qe8fa4b5xNU",
+     "videoTitle": "화사 (HWASA) - 'Good Goodbye' MV",
+     "duration": 226
+    },
+    {
+     "rank": 7,
+     "last": 8,
+     "title": "Drip",
+     "artist": "ATEEZ",
+     "cover": "https://i.kfs.io/album/global/299541810,0v1/fit/160x160.jpg",
+     "video": "iqQWCYMlMw0",
+     "videoTitle": "ATEEZ(에이티즈) - 'Drip' Official MV",
+     "duration": 191
+    },
+    {
+     "rank": 8,
+     "last": 7,
+     "title": "DESERVE",
+     "artist": "BABYMONSTER",
+     "cover": "https://i.kfs.io/album/global/299951696,0v1/fit/160x160.jpg",
+     "video": "1bIk_K_OZL4",
+     "videoTitle": "BABYMONSTER (베이비몬스터) - DESERVE | Show! MusicCore | MBC261024방송",
+     "duration": 202
+    },
+    {
+     "rank": 9,
+     "last": 9,
+     "title": "Golden",
+     "artist": "KPop Demon Hunters Cast",
+     "cover": "https://i.kfs.io/album/global/281602486,0v2/fit/160x160.jpg",
+     "video": "hohuFW0zQUw",
+     "videoTitle": "HUNTR/X (Huntrix) - ‘Golden’ Music Video | KPop Demon Hunters | Netflix Philippines",
+     "duration": 137
+    },
+    {
+     "rank": 10,
+     "last": 10,
+     "title": "You’re Under Arrest",
+     "artist": "ILLIT",
+     "cover": "https://i.kfs.io/album/global/300533851,0v3/fit/160x160.jpg",
+     "video": "V2V9-9VhYJo",
+     "videoTitle": "ILLIT (아일릿) '체포하겠어 (You’re Under Arrest)’ Official MV",
+     "duration": 190
+    },
+    {
+     "rank": 11,
+     "last": 22,
+     "title": "With",
+     "artist": "RESCENE",
+     "cover": "https://i.kfs.io/album/global/300721575,0v1/fit/160x160.jpg",
+     "video": "pey3E47eSc8",
+     "videoTitle": "RESCENE (리센느) 'With' Official MV",
+     "duration": 202
+    },
+    {
+     "rank": 12,
+     "last": 11,
+     "title": "CRUMBS",
+     "artist": "IVE",
+     "cover": "https://i.kfs.io/album/global/300450747,0v2/fit/160x160.jpg",
+     "video": "Fk17YiSI5UI",
+     "videoTitle": "IVE 아이브 'CRUMBS' Extended MV",
+     "duration": 201
+    },
+    {
+     "rank": 13,
+     "last": 12,
+     "title": "Girls Girls Girls",
+     "artist": "IVE",
+     "cover": "https://i.kfs.io/album/global/300450747,0v2/fit/160x160.jpg",
+     "video": "44htWYZvDMU",
+     "videoTitle": "IVE (아이브) 'Girls Girls Girls' MV",
+     "duration": 163
+    },
+    {
+     "rank": 14,
+     "last": 18,
+     "title": "CHOOM",
+     "artist": "BABYMONSTER",
+     "cover": "https://i.kfs.io/album/global/292884745,0v1/fit/160x160.jpg",
+     "video": "8Jdrd2vUdl8",
+     "videoTitle": "BABYMONSTER - CHOOM MV Official",
+     "duration": 205
+    },
+    {
+     "rank": 15,
+     "last": 14,
+     "title": "SNAKESKIN",
+     "artist": "IVE",
+     "cover": "https://i.kfs.io/album/global/300450747,0v2/fit/160x160.jpg",
+     "video": "szV_1oOjIzw",
+     "videoTitle": "IVE 아이브 'SNAKESKIN'  MV",
+     "duration": 206
+    },
+    {
+     "rank": 16,
+     "last": 20,
+     "title": "Blue Sky",
+     "artist": "銀赫",
+     "cover": "https://i.kfs.io/album/tw/300372026,0v1/fit/160x160.jpg",
+     "video": "Bkmlr6t3Vs0",
+     "videoTitle": "EUNHYUK ‘Blue Sky’ MV",
+     "duration": 198
+    },
+    {
+     "rank": 17,
+     "last": 13,
+     "title": "Mirror Mirror",
+     "artist": "IVE",
+     "cover": "https://i.kfs.io/album/global/300450747,0v2/fit/160x160.jpg",
+     "video": "z-9a5iTwJ6k",
+     "videoTitle": "IVE 아이브 'Mirror Mirror' MV",
+     "duration": 195
+    },
+    {
+     "rank": 18,
+     "last": 16,
+     "title": "HOME SWEET HOME",
+     "artist": "G-DRAGON",
+     "cover": "https://i.kfs.io/album/global/276592163,0v1/fit/160x160.jpg",
+     "video": "fLi0EJfi_vg",
+     "videoTitle": "G-DRAGON - HOME SWEET HOME (Official Audio) (feat. TAEYANG & DAESUNG)",
+     "duration": 212
+    },
+    {
+     "rank": 19,
+     "last": 26,
+     "title": "It's Me",
+     "artist": "ILLIT",
+     "cover": "https://i.kfs.io/album/global/293036277,0v1/fit/160x160.jpg",
+     "video": "LM875jeR-PM",
+     "videoTitle": "ILLIT (아일릿) 'It's Me' Dance Practice",
+     "duration": 144
+    },
+    {
+     "rank": 20,
+     "last": 17,
+     "title": "BANG BANG BANG",
+     "artist": "BIGBANG",
+     "cover": "https://i.kfs.io/album/global/6587809,1v1/fit/160x160.jpg",
+     "video": "kYzcQqFNhK0",
+     "videoTitle": "[4K 60FPS] BIGBANG - BANG BANG BANG MV",
+     "duration": 229
+    }
+   ]
+  }
+ ]
+}

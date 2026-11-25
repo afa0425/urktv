@@ -2,6 +2,7 @@
 import base64, json, os, sys, urllib.request
 
 ACC = sys.argv[1]; SITE = sys.argv[2]; NAME = sys.argv[3]
+SKIP_FILES = '--worker-only' in sys.argv
 API = f'https://api.cloudflare.com/client/v4/accounts/{ACC}'
 H = {'Authorization': 'Bearer proxy-injected'}
 
@@ -34,7 +35,7 @@ def flush():
         call('PUT', f"/storage/kv/namespaces/{ns['id']}/bulk", batch)
         print(f'  uploaded {len(batch)} files ({size / 1e6:.1f} MB)')
     batch, size = [], 0
-for key, p in sorted(files):
+for key, p in ([] if SKIP_FILES else sorted(files)):
     if key == '_headers':
         continue
     b = open(p, 'rb').read()
@@ -46,9 +47,11 @@ for key, p in sorted(files):
     size += len(b)
 flush()
 
-# 3. the Worker
+# 3. the Worker (password: set once with --password; kept afterwards)
+pw = next((a.split('=', 1)[1] for a in sys.argv if a.startswith('--password=')), None)
 meta = {'main_module': 'worker.js', 'compatibility_date': '2026-10-01',
-        'bindings': [{'type': 'kv_namespace', 'name': 'SITE', 'namespace_id': ns['id']}]}
+        'bindings': [{'type': 'kv_namespace', 'name': 'SITE', 'namespace_id': ns['id']}],
+        'keep_bindings': ['secret_text']}  # keep SITE_USER / SITE_PASS across deploys
 boundary = 'hisingboundary'
 src = open(os.path.join(os.path.dirname(__file__), 'worker.js'), 'rb').read()
 body = (f'--{boundary}\r\nContent-Disposition: form-data; name="metadata"\r\nContent-Type: application/json\r\n\r\n'
@@ -56,6 +59,10 @@ body = (f'--{boundary}\r\nContent-Disposition: form-data; name="metadata"\r\nCon
         'Content-Type: application/javascript+module\r\n\r\n').encode() + src + f'\r\n--{boundary}--\r\n'.encode()
 call('PUT', f'/workers/scripts/{NAME}', body, f'multipart/form-data; boundary={boundary}', raw=True)
 print('worker uploaded')
+if pw:
+    for name, text in (('SITE_USER', 'urktv'), ('SITE_PASS', pw)):
+        call('PUT', f'/workers/scripts/{NAME}/secrets', {'name': name, 'text': text, 'type': 'secret_text'})
+    print('password set')
 
 # 4. public on workers.dev
 call('POST', f'/workers/scripts/{NAME}/subdomain', {'enabled': True, 'previews_enabled': True})

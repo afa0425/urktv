@@ -764,3 +764,253 @@ a.btn {
     height: 240px;
   }
 }
+
+/* ---------- URKTV home ---------- */
+.home {
+  gap: 30px;
+}
+.brand {
+  letter-spacing: 0.04em;
+}
+.hero-card {
+  position: relative;
+  border-radius: 22px;
+  overflow: hidden;
+  min-height: 330px;
+  background: #241b33 center / cover no-repeat;
+  display: flex;
+  align-items: flex-end;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+}
+.hero-shade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(14, 10, 22, 0.96) 0%, rgba(14, 10, 22, 0.78) 45%, rgba(14, 10, 22, 0.2) 100%),
+    linear-gradient(0deg, rgba(14, 10, 22, 0.9) 0%, transparent 55%);
+}
+.hero-body {
+  position: relative;
+  padding: 28px;
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.hero-title {
+  font-size: clamp(2.2rem, 7vw, 3.6rem);
+  line-height: 1.05;
+  font-weight: 900;
+}
+.hero-artist {
+  font-size: 1.15rem;
+  color: #ffd7a8;
+  font-weight: 700;
+}
+.hero-desc {
+  color: rgba(255, 255, 255, 0.78);
+  max-width: 46ch;
+}
+.chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.chip-ai,
+.chip-soft {
+  padding: 4px 10px;
+  border-radius: 99px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.chip-ai {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #1a0f16;
+}
+.chip-soft {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+.chip-ai.small,
+.chip-soft.small {
+  font-size: 0.72rem;
+  padding: 3px 8px;
+}
+.btn.ghost-light {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+/* charts */
+.charts {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.charts h2 {
+  margin: 0;
+  font-size: 1.3rem;
+}
+.seg {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.seg-btn {
+  border: 1px solid var(--line);
+  background: var(--bg2);
+  color: var(--muted);
+  padding: 7px 16px;
+  border-radius: 99px;
+  cursor: pointer;
+  white-space: nowrap;
+  font-weight: 700;
+}
+.seg-btn.on {
+  background: var(--text);
+  color: var(--bg);
+  border-color: var(--text);
+}
+.chart-filter {
+  max-width: 360px;
+}
+.rank-list {
+  display: grid;
+  gap: 6px;
+}
+.rank-row {
+  display: grid;
+  grid-template-columns: 2.4em 3.2em 72px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 14px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+.rank-row:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+.rank-row.top {
+  background: linear-gradient(90deg, rgba(255, 179, 71, 0.12), var(--card) 60%);
+  border-color: rgba(255, 179, 71, 0.35);
+}
+.rank-no {
+  font-size: 1.25rem;
+  font-weight: 900;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.rank-row.top .rank-no {
+  font-size: 1.6rem;
+}
+.mv {
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-align: center;
+}
+.mv.up {
+  color: #5df2b6;
+}
+.mv.down {
+  color: #ff7a9a;
+}
+.mv.same {
+  color: var(--muted);
+}
+.mv.new {
+  color: #1a0f16;
+  background: #ffd24c;
+  border-radius: 6px;
+  padding: 1px 4px;
+}
+.rank-thumb {
+  width: 72px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 8px;
+  background: var(--bg2);
+  display: grid;
+  place-items: center;
+}
+.rank-info {
+  min-width: 0;
+}
+.rank-title {
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rank-artist {
+  color: var(--muted);
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rank-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* quick actions */
+.quick {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+.quick-card {
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+  border-radius: 16px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+}
+.quick-card:hover {
+  border-color: rgba(255, 255, 255, 0.25);
+}
+.quick-card.form {
+  cursor: default;
+}
+.quick-card input {
+  width: 100%;
+}
+.quick-card .btn {
+  align-self: flex-start;
+}
+.quick-icon {
+  font-size: 1.5rem;
+}
+
+@media (max-width: 640px) {
+  .rank-row {
+    grid-template-columns: 2em 2.6em 56px minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+  .rank-row .chip-ai,
+  .rank-row .chip-soft {
+    display: none;
+  }
+  .rank-thumb {
+    width: 56px;
+    height: 32px;
+  }
+  .hero-card {
+    min-height: 300px;
+  }
+  .hero-body {
+    padding: 20px;
+  }
+}
