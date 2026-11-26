@@ -30,7 +30,7 @@ function Move({ rank, last }: { rank: number; last: number | null }) {
   return <span className="mv same">—</span>;
 }
 
-export function Home({ onSing }: { onSing(song: Song): void; onMine?(): void }) {
+export function Home({ onSing, onRoom }: { onSing(song: Song): void; onRoom(): void }) {
   const t = useT();
   const plays = useStore(history);
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
@@ -99,6 +99,9 @@ export function Home({ onSing }: { onSing(song: Song): void; onMine?(): void }) 
             🎤 開唱
           </button>
         </form>
+        <button className="btn room-cta" onClick={onRoom}>
+          🎉 開房同樂 · 邀朋友一起唱、開直播給大家看
+        </button>
         <div className="h-status">
           {!ext.present ? (
             <>

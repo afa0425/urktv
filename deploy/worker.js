@@ -25,8 +25,151 @@ function checkSong(p) {
   return null;
 }
 
+
+// ---------- rooms: sing together / watch live. One Durable Object per room code ----------
+// The room only keeps who is in it, the song queue, the shared clock and chat; it relays WebRTC
+// signalling. Voices and cameras go browser to browser; every member plays the MV on their own
+// YouTube player (the MV itself is never re-streamed).
+const ROOM_CODE = /^[A-Z0-9]{4,8}$/;
+const clean = (s, n) => String(s ?? '').replace(/[\u0000-\u001f]/g, '').slice(0, n);
+
+export class Room {
+  constructor(state) {
+    this.state = state;
+    this.socks = new Map(); // id -> { ws, name, role, cam }
+    this.queue = [];
+    this.now = null; // { videoId, title, singer, singerName, startAt, pausedAt }
+    this.chat = [];
+    this.seq = 0;
+  }
+  async fetch(req) {
+    if (req.headers.get('upgrade') !== 'websocket') return new Response('websocket only', { status: 426 });
+    const [client, server] = Object.values(new WebSocketPair());
+    server.accept();
+    const id = 'u' + (++this.seq).toString(36) + Math.random().toString(36).slice(2, 6);
+    this.socks.set(id, { ws: server, name: '', role: 'watch', cam: false, joined: false });
+    server.addEventListener('message', (e) => this.onMsg(id, e.data));
+    const bye = () => this.leave(id);
+    server.addEventListener('close', bye);
+    server.addEventListener('error', bye);
+    server.send(JSON.stringify({ type: 'hello', id, server: Date.now() }));
+    return new Response(null, { status: 101, webSocket: client });
+  }
+  send(id, m) {
+    try {
+      this.socks.get(id)?.ws.send(JSON.stringify(m));
+    } catch {}
+  }
+  all(m, except) {
+    const s = JSON.stringify(m);
+    for (const [id, u] of this.socks) if (id !== except && u.joined) try { u.ws.send(s); } catch {}
+  }
+  snapshot() {
+    const members = [...this.socks].filter(([, u]) => u.joined).map(([id, u]) => ({ id, name: u.name, role: u.role, cam: u.cam }));
+    return { type: 'state', members, queue: this.queue, now: this.now, server: Date.now() };
+  }
+  broadcast() {
+    this.all(this.snapshot());
+  }
+  leave(id) {
+    const u = this.socks.get(id);
+    if (!u) return;
+    this.socks.delete(id);
+    if (this.now && this.now.singer === id) this.nextSong();
+    this.all({ type: 'left', id });
+    this.broadcast();
+  }
+  nextSong() {
+    const n = this.queue.shift();
+    this.now = n ? { ...n, singer: n.by, singerName: n.byName, startAt: Date.now() + 4000, pausedAt: null } : null;
+  }
+  onMsg(id, raw) {
+    let m;
+    try {
+      m = JSON.parse(raw);
+    } catch {
+      return;
+    }
+    const u = this.socks.get(id);
+    if (!u) return;
+    switch (m.type) {
+      case 'ping':
+        return this.send(id, { type: 'pong', t0: m.t0, server: Date.now() });
+      case 'join':
+        if (this.socks.size > 30) return this.send(id, { type: 'full' });
+        u.name = clean(m.name, 20) || '歌手';
+        u.role = m.role === 'sing' ? 'sing' : 'watch';
+        u.cam = !!m.cam;
+        u.joined = true;
+        this.send(id, { type: 'chatlog', chat: this.chat });
+        this.all({ type: 'joined', id, name: u.name, role: u.role }, id);
+        return this.broadcast();
+      case 'cam':
+        u.cam = !!m.on;
+        return this.broadcast();
+      case 'chat': {
+        const c = { from: u.name, text: clean(m.text, 200), at: Date.now() };
+        if (!c.text.trim()) return;
+        this.chat = [...this.chat.slice(-49), c];
+        return this.all({ type: 'chat', ...c });
+      }
+      case 'react':
+        return this.all({ type: 'react', from: u.name, emoji: clean(m.emoji, 8) });
+      case 'queue': {
+        if (!/^[A-Za-z0-9_-]{11}$/.test(m.videoId || '') || this.queue.length >= 50) return;
+        this.queue.push({ videoId: m.videoId, title: clean(m.title, 120), by: id, byName: u.name });
+        if (!this.now) this.nextSong();
+        return this.broadcast();
+      }
+      case 'unqueue':
+        this.queue = this.queue.filter((q, i) => !(i === m.index && (q.by === id || this.now?.singer === id)));
+        return this.broadcast();
+      case 'next':
+        if (this.now && this.now.singer !== id && this.socks.has(this.now.singer)) return; // only the singer skips (or anyone if they left)
+        this.nextSong();
+        return this.broadcast();
+      case 'ended':
+        if (this.now && this.now.singer === id) {
+          this.nextSong();
+          this.broadcast();
+        }
+        return;
+      case 'pause':
+      case 'resume':
+      case 'seek': {
+        if (!this.now || this.now.singer !== id) return; // the singer controls the song
+        const t = Date.now();
+        const pos = this.now.pausedAt ?? (t - this.now.startAt) / 1000;
+        if (m.type === 'pause') this.now.pausedAt = pos;
+        if (m.type === 'resume') {
+          this.now.startAt = t - (this.now.pausedAt ?? pos) * 1000;
+          this.now.pausedAt = null;
+        }
+        if (m.type === 'seek') {
+          const to = Math.max(0, +m.t || 0);
+          if (this.now.pausedAt !== null) this.now.pausedAt = to;
+          else this.now.startAt = t - to * 1000;
+        }
+        return this.broadcast();
+      }
+      case 'signal':
+        // WebRTC offer / answer / ICE between two members
+        if (this.socks.has(m.to)) this.send(m.to, { type: 'signal', from: id, data: m.data });
+        return;
+    }
+  }
+}
+
+async function roomSocket(req, env, code) {
+  if (!env.ROOMS) return json({ error: 'rooms not configured' }, 503);
+  if (!ROOM_CODE.test(code)) return json({ error: 'bad room code' }, 400);
+  return env.ROOMS.get(env.ROOMS.idFromName(code)).fetch(req);
+}
+
 async function api(req, env, url) {
   const path = url.pathname.replace(/^\/api\/?/, '');
+  const rm = /^room\/([A-Za-z0-9]+)$/.exec(path);
+  if (rm) return roomSocket(req, env, rm[1].toUpperCase());
   if (!env.SONGS) return json({ error: 'song library not configured' }, 503);
   // list
   if (path === 'songs' && req.method === 'GET') {

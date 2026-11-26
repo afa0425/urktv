@@ -79,14 +79,25 @@ print('song library', songs_ns['id'])
 pw = next((a.split('=', 1)[1] for a in sys.argv if a.startswith('--password=')), None)
 meta = {'main_module': 'worker.js', 'compatibility_date': '2026-10-01',
         'bindings': [{'type': 'kv_namespace', 'name': 'SITE', 'namespace_id': ns['id']},
-                     {'type': 'kv_namespace', 'name': 'SONGS', 'namespace_id': songs_ns['id']}],
+                     {'type': 'kv_namespace', 'name': 'SONGS', 'namespace_id': songs_ns['id']},
+                     {'type': 'durable_object_namespace', 'name': 'ROOMS', 'class_name': 'Room'}],
         'keep_bindings': ['secret_text']}  # keep SITE_USER / SITE_PASS across deploys
 boundary = 'hisingboundary'
 src = open(os.path.join(os.path.dirname(__file__), 'worker.js'), 'rb').read()
-body = (f'--{boundary}\r\nContent-Disposition: form-data; name="metadata"\r\nContent-Type: application/json\r\n\r\n'
-        f'{json.dumps(meta)}\r\n--{boundary}\r\nContent-Disposition: form-data; name="worker.js"; filename="worker.js"\r\n'
-        'Content-Type: application/javascript+module\r\n\r\n').encode() + src + f'\r\n--{boundary}--\r\n'.encode()
-call('PUT', f'/workers/scripts/{NAME}', body, f'multipart/form-data; boundary={boundary}', raw=True)
+def upload_worker(meta):
+    body = (f'--{boundary}\r\nContent-Disposition: form-data; name="metadata"\r\nContent-Type: application/json\r\n\r\n'
+            f'{json.dumps(meta)}\r\n--{boundary}\r\nContent-Disposition: form-data; name="worker.js"; filename="worker.js"\r\n'
+            'Content-Type: application/javascript+module\r\n\r\n').encode() + src + f'\r\n--{boundary}--\r\n'.encode()
+    return call('PUT', f'/workers/scripts/{NAME}', body, f'multipart/form-data; boundary={boundary}', raw=True)
+
+
+# rooms (Durable Objects): the class is created once with a migration; later uploads must not repeat it
+try:
+    upload_worker({**meta, 'migrations': {'new_tag': 'rooms-v1', 'new_sqlite_classes': ['Room']}})
+except SystemExit as e:
+    if 'migration' not in str(e).lower() and 'tag' not in str(e).lower():
+        raise
+    upload_worker(meta)
 print('worker uploaded')
 admin = next((a.split('=', 1)[1] for a in sys.argv if a.startswith('--admin-key=')), None)
 upload = next((a.split('=', 1)[1] for a in sys.argv if a.startswith('--upload-key=')), None)
