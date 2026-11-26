@@ -68,7 +68,7 @@ function pitchFeed(t: number, voc: Float32Array[]) {
   const midi: (number | null)[] = [];
   let pos = 0;
   for (; pos + PF <= P.buf.length; pos += PH) {
-    const r = detectPitch(P.buf.subarray(pos, pos + PF), PR, 0.85, 0.006);
+    const r = detectPitch(P.buf.subarray(pos, pos + PF), PR, 0.9, 0.006);
     midi.push(r ? Math.round(freqToMidi(r.freq) * 10) / 10 : null);
   }
   if (midi.length) toPage({ type: 'pitch', t: P.t + PF / 2 / PR, hop: PH / PR, midi });
@@ -410,11 +410,28 @@ chrome.runtime.onMessage.addListener((m: any) => {
     S.clock = { t: msg.t, at: performance.now(), playing: msg.playing };
   } else if ((msg as any).type === 'setmode') {
     // the page decided: e.g. too slow for the AI even with a long head start -> classic
-    const m = (msg as any).mode as 'ai' | 'classic';
+    const mm = msg as any;
+    const m = mm.mode as 'ai' | 'classic';
     S.mode = m;
     if (m === 'classic' && S.using === 'ai') {
       S.using = 'classic';
       S.done = S.len; // classic continues from the live edge
+    } else if (m === 'ai' && S.using === 'classic') {
+      // the singer switched to the AI mid-song: load it if needed, then continue from the live edge
+      const go = () => {
+        if (S.mode !== 'ai') return;
+        S.using = 'ai';
+        S.done = Math.max(0, S.len - S.cfg!.nFft / 2);
+      };
+      if (S.session) go();
+      else if (!S.loadingModel && mm.modelUrl) {
+        S.loadingModel = true;
+        toPage({ type: 'status', state: 'loading' });
+        loadModel(mm.modelUrl, mm.ortBase, mm.model)
+          .finally(() => (S.loadingModel = false))
+          .then(go)
+          .catch((e) => toPage({ type: 'status', state: 'fallback', mode: 'classic', message: String(e?.message ?? e) }));
+      }
     }
   } else if (msg.type === 'vocal') {
     vocGain.gain.setTargetAtTime(msg.level, ctx.currentTime, 0.03);

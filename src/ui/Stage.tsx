@@ -27,6 +27,9 @@ const PRAISE = ['好穩！', '太強了！', '停不下來！', '神準！', '�
 const LINE_PRAISE = ['這句好聽！', '有味道！', '好穩！', '像原唱一樣！', '這句可以收錄了！'];
 
 /** Synced lyrics for a YouTube title from LRCLIB (free, public). Line timing only. */
+/** About how long a lyric line takes to sing (web lyrics only give when it starts). */
+const sungDur = (text: string) => Math.max(1, text.replace(/\s/g, '').length * 0.33 + 0.4);
+
 async function findLyrics(videoTitle: string): Promise<{ lrc: string; name: string } | null> {
   const inner = /[【「《\[](.+?)[】」》\]]/.exec(videoTitle)?.[1];
   const clean = videoTitle
@@ -119,6 +122,10 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   // with the URKTV extension (computer Chrome) the MV's vocal is removed on this computer, live
   const ext = useExtension();
   const [wantBacking, setWantBacking] = useState(true);
+  // AI backing (clean, may need a head start) or fast backing (classic cut: starts at once, duller)
+  const [bmode, setBmode] = useState<'ai' | 'fast'>(() => (localStorage.getItem('urktv.bmode') === 'fast' ? 'fast' : 'ai'));
+  const bmodeRef = useRef(bmode);
+  bmodeRef.current = bmode;
   // any YouTube song can get the live backing track: library songs, and links pasted on Home
   const ytPlain = !own && !isDemo;
   const ytAny = ytCat || ytPlain;
@@ -281,9 +288,13 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
     const id = window.setInterval(() => {
       const tr = transport.current;
       if (!(tr instanceof DualTransport)) return;
-      // the classic vocal cut needs almost no head start; the AI needs its full window
       const st = extRef.current.status;
-      if (st?.mode === 'classic') tr.ahead = 2;
+      if (st?.mode === 'ai' && (st.speed ?? 0) > 0) localStorage.setItem('urktv.aiSpeed', String(st.speed));
+      const aiOn = bmodeRef.current === 'ai' && !extRef.current.fellBack && st?.mode !== 'classic';
+      const left = Math.max(0, (tr.duration() || 300) - tr.time());
+      // the lead may run as far ahead as the AI needs; the fast backing needs 2 s
+      const want = aiOn ? aiNeed(aiSpeed() || 1, left) : 2;
+      if (tr.started) tr.ahead = Math.max(2, want);
       if (!rebuffering.current) tr.keepAhead();
       if (!tr.solo && mainSince.current) {
         const b = st?.buffered ?? 99;
@@ -291,13 +302,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
           // like a video buffering: the picture waits for the backing, the small window keeps going
           tr.holdForBacking();
           rebuffering.current = true;
-          // the AI can't keep up on this computer: the classic vocal cut from here on
-          if (st?.mode !== 'classic' && !extRef.current.fellBack) {
-            extRef.current.fellBack = true;
-            extPost({ type: 'setmode', mode: 'classic' });
-            tr.ahead = 2;
-          }
-        } else if (rebuffering.current && b > Math.min(5, tr.ahead + 1)) {
+        } else if (rebuffering.current && b >= Math.min(want, 600) - 0.5) {
           rebuffering.current = false;
           tr.main.play();
         }
@@ -325,9 +330,9 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
     if (phase !== 'live' || saved?.kind !== 'lrc' || !chart?.lines.length) return;
     const id = window.setInterval(() => {
       if (manualLyrics.current) return;
-      const lines = chart.lines.map((l) => ({ start: l.start, end: Math.min(l.end, l.start + 6) }));
-      const r = liveNotes.current.alignOffset(lines);
-      if (!r || r.voiced < 8) return;
+      const lines = chart.lines.filter((l) => l.text.trim()).map((l) => ({ start: l.start, end: Math.min(l.end, l.start + sungDur(l.text)) }));
+      const r = liveNotes.current.alignOffset(lines, 60);
+      if (!r || r.voiced < 12) return;
       const cur = (saved.offsetMs ?? 0) / 1000;
       if (Math.abs(r.off - cur) >= 0.3) patchChart({ offsetMs: Math.round(r.off * 1000) });
     }, 4000);
@@ -593,6 +598,39 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
     return () => cancelAnimationFrame(raf);
   }, [phase]);
 
+  /** This computer's AI speed (× real time): measured now, or remembered from last time. */
+  const aiSpeed = () => {
+    const st = extRef.current.status;
+    if (st?.mode === 'ai' && (st.speed ?? 0) > 0) return st.speed!;
+    return Number(localStorage.getItem('urktv.aiSpeed')) || 0;
+  };
+  /** Seconds of AI backing to have ready so it lasts `left` seconds of song at speed sp. */
+  const aiNeed = (sp: number, left: number) => (sp >= 1.15 ? 8 : Math.min(600, left * (1 / sp - 1) + 8));
+
+  /** The singer picks: original / fast backing / AI backing (both made on their own computer). */
+  const pickMode = (m: 'orig' | 'fast' | 'ai') => {
+    if (m === 'orig') {
+      if (phase === 'live' && backing) changeVocal(1);
+      else setWantBacking(false);
+      return;
+    }
+    localStorage.setItem('urktv.bmode', m);
+    setBmode(m);
+    if (!backing) {
+      setWantBacking(true);
+      if (phase === 'live') setPhase('ready'); // the players are rebuilt: press start again
+      return;
+    }
+    changeVocal(0);
+    if (phase === 'live' && m !== bmode) {
+      extRef.current.fellBack = false;
+      const md = MODELS.kara2;
+      extPost({ type: 'setmode', mode: m === 'ai' ? 'ai' : 'classic', modelUrl: MODEL_BASE + md.file, ortBase: ORT_BASE, model: 'kara2' } as any);
+      const tr = transport.current;
+      if (tr instanceof DualTransport) tr.ahead = 2;
+    }
+  };
+
   const start = async (withMic: boolean) => {
     setMicErr(null);
     if (withMic) {
@@ -619,20 +657,17 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
       // the lead player starts first; the AI gets LEAD seconds of head start
       const m = MODELS.kara2;
       extRef.current.fellBack = false;
-      extPost({ type: 'start', lead: LEAD, vocal, mode: 'ai', modelUrl: MODEL_BASE + m.file, ortBase: ORT_BASE, model: 'kara2' });
+      const ai = bmodeRef.current === 'ai';
+      extPost({ type: 'start', lead: LEAD, vocal, mode: ai ? 'ai' : 'classic', modelUrl: MODEL_BASE + m.file, ortBase: ORT_BASE, model: 'kara2' });
       let started = false;
-      // how much backing to prepare before the picture starts: enough that the AI, at this
-      // computer's speed, is never caught up before the end of the song
       const t0 = performance.now();
-      // how much backing to prepare before the picture starts. The AI only if this computer runs it
-      // faster than the song; otherwise the classic vocal cut (2 s head start). Never wait long.
+      // how much backing to prepare before the picture starts: fast backing 2 s; AI enough that this
+      // computer, at its measured speed, is never caught up before the end of the song
       const need = () => {
-        const st = extRef.current.status;
-        const sp = st?.speed ?? 0;
-        if (extRef.current.fellBack || st?.mode === 'classic') return 2;
-        if (sp >= 1.15) return 8;
-        if (sp > 0 || performance.now() - t0 > 12000) return -1; // too slow / no answer: go classic
-        return LEAD;
+        if (!ai || extRef.current.fellBack) return 2;
+        const sp = aiSpeed();
+        if (!sp) return performance.now() - t0 > 40000 ? -1 : LEAD; // model still loading
+        return aiNeed(sp, tr.duration() || 300);
       };
       tr.startStaggered(
         () => {
@@ -643,6 +678,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
           const st = extRef.current.status;
           let n = need();
           if (n === -1) {
+            // the AI never answered on this computer: fast backing, so the song can start
             extPost({ type: 'setmode', mode: 'classic' });
             extRef.current.fellBack = true;
             n = 2;
@@ -766,6 +802,32 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
               </div>
             )}
           </div>
+          {ytAny && ext.present && ext.consent && !backingFailed && (
+            <div className="sing-mode">
+              <div className="seg" role="radiogroup">
+                {(['orig', 'fast', 'ai'] as const).map((m) => {
+                  const on = m === 'orig' ? !backing || vocal >= 0.5 : backing && vocal < 0.5 && bmode === m;
+                  return (
+                    <button key={m} role="radio" aria-checked={on} className={'seg-btn' + (on ? ' on' : '')} onClick={() => pickMode(m)}>
+                      {m === 'orig' ? '🎤 原唱' : m === 'fast' ? '⚡ 快速伴奏' : '✨ AI 伴奏'}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="muted small sing-mode-note">
+                {!backing || vocal >= 0.5
+                  ? '播原本的 MV 聲音'
+                  : bmode === 'fast'
+                    ? '你的電腦即時去人聲：馬上開始，人聲會有點悶'
+                    : (() => {
+                        const sp = aiSpeed();
+                        if (!sp) return '你的電腦用 AI 即時去人聲：最乾淨，第一次會先測你的電腦速度';
+                        const w = Math.round(aiNeed(sp, hud.dur || 240));
+                        return `你的電腦用 AI 即時去人聲：最乾淨 · 你的電腦 ${sp.toFixed(1)} 倍速` + (sp >= 1.15 ? '，幾秒就開始' : `，開始前要先等約 ${w} 秒`);
+                      })()}
+              </p>
+            </div>
+          )}
           <div className="ktv" ref={ktvRef} aria-live="off">
             {chart && chart.lines.length > 0 ? (
               [0, 1].map((row) => {
@@ -777,7 +839,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
                   <p key={row} className={'ktv-row ' + (row ? 'r' : 'l') + (j === li ? ' now' : '')}>
                     {dots > 0 && <span className="ktv-dots">{'●'.repeat(dots)}</span>}
                     {line &&
-                      (line.parts.length ? line.parts : [{ start: line.start, end: line.end, text: line.text }]).map((p, k) => (
+                      (line.parts.length ? line.parts : [{ start: line.start, end: Math.min(line.end, line.start + sungDur(line.text)), text: line.text }]).map((p, k) => (
                         <span
                           key={k}
                           className="ktv-ch"
@@ -817,11 +879,6 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
               <button className="btn small" onClick={() => seekTo(hud.time + 10)} aria-label="+10">
                 10 ⏩
               </button>
-              {(backing || !!local) && (
-                <button className={'btn small' + (vocal >= 0.5 ? ' primary' : '')} onClick={() => changeVocal(vocal >= 0.5 ? 0 : 1)} aria-label="vocal">
-                  {vocal >= 0.5 ? '🎤 原唱' : '🎶 伴唱'}
-                </button>
-              )}
               {firstVoice() !== null && hud.time < (firstVoice() ?? 0) && (
                 <button className="btn small" onClick={() => seekTo(firstVoice()!)}>
                   {t('stage.skipIntro')}
@@ -925,10 +982,6 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
               )}
               {ext.present && ext.consent && (
                 <>
-                  <label className="check">
-                    <input type="checkbox" checked={wantBacking} disabled={phase === 'live'} onChange={(e) => setWantBacking(e.target.checked)} />
-                    {t('ext.on')}
-                  </label>
                   {backing && (
                     <>
                       {/* the lead player must stay visible and uncovered (YouTube rules): it sits here, not over the MV */}

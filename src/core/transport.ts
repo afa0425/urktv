@@ -474,7 +474,8 @@ export class DualTransport implements Transport {
     window.clearInterval(this.timer);
     const t0 = performance.now();
     this.timer = window.setInterval(() => {
-      const ok = ready ? ready() : this.lead.time() >= this.ahead;
+      // a lead that already reached the end has given the extension everything: start
+      const ok = (ready ? ready() : this.lead.time() >= this.ahead) || this.lead.ended();
       // never hold the picture forever (a lead that cannot get going, an ad...)
       if (ok || performance.now() - t0 > 10 * 60 * 1000) {
         window.clearInterval(this.timer);
