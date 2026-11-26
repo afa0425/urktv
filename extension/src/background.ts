@@ -8,7 +8,7 @@ async function ensureOffscreen() {
   if (ctxs && ctxs.length) return;
   if (!creating) {
     creating = chrome.offscreen
-      .createDocument({ url: 'offscreen.html', reasons: [chrome.offscreen.Reason.AUDIO_PLAYBACK], justification: 'Plays the backing track made from the video on this computer.' })
+      .createDocument({ url: 'offscreen.html', reasons: [chrome.offscreen.Reason.AUDIO_PLAYBACK, chrome.offscreen.Reason.WORKERS], justification: 'Plays the backing track made from the video on this computer; runs the vocal-removal model in a worker.' })
       .catch(() => {})
       .finally(() => (creating = null));
   }

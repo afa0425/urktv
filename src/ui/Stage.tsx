@@ -76,6 +76,8 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   const [key, setKey] = useState(0);
   const [keyBusy, setKeyBusy] = useState(false);
   const [vocal, setVocal] = useState(0);
+  const vocalRef = useRef(0);
+  vocalRef.current = vocal;
   const base = useRef<{ inst: Float32Array[]; voc: Float32Array[] } | null>(null);
   const video = useRef<YouTubeTransport | null>(null);
 
@@ -153,6 +155,8 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   const [countdown, setCountdown] = useState(0);
   const mainSince = useRef(0);
   const manualLyrics = useRef(false);
+  const lastRestart = useRef(0);
+  const [hold, setHold] = useState<number | null>(null); // seconds of backing still to prepare
   // gray bars made live by the extension (songs without prepared bars)
   const liveNotes = useRef(new LiveNotes());
   useEffect(() => {
@@ -289,6 +293,16 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
       const tr = transport.current;
       if (!(tr instanceof DualTransport)) return;
       const st = extRef.current.status;
+      // the extension's engine was reopened by Chrome and knows nothing: start it again from here
+      if (st?.state === 'lost' && tr.started && !tr.solo && performance.now() - lastRestart.current > 3000) {
+        lastRestart.current = performance.now();
+        const md = MODELS.kara2;
+        const ai = bmodeRef.current === 'ai' && !extRef.current.fellBack;
+        extPost({ type: 'start', lead: LEAD, vocal: vocalRef.current, mode: ai ? 'ai' : 'classic', modelUrl: MODEL_BASE + md.file, ortBase: ORT_BASE, model: 'kara2' });
+        rebuffering.current = true;
+        tr.main.pause();
+        tr.seek(tr.time(), true);
+      }
       if (st?.mode === 'ai' && (st.speed ?? 0) > 0) localStorage.setItem('urktv.aiSpeed', String(st.speed));
       const aiOn = bmodeRef.current === 'ai' && !extRef.current.fellBack && st?.mode !== 'classic';
       const left = Math.max(0, (tr.duration() || 300) - tr.time());
@@ -297,15 +311,19 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
       if (tr.started) tr.ahead = Math.max(2, want);
       if (!rebuffering.current) tr.keepAhead();
       if (!tr.solo && mainSince.current) {
-        const b = st?.buffered ?? 99;
+        // no word from the extension for 2 s: it is stuck, there is no backing to play
+        const fresh = performance.now() - ((st as any)?.at ?? 0) < 2000;
+        const b = fresh ? st?.buffered ?? 0 : 0;
         if (tr.playing() && b < 0.8) {
           // like a video buffering: the picture waits for the backing, the small window keeps going
           tr.holdForBacking();
           rebuffering.current = true;
-        } else if (rebuffering.current && b >= Math.min(want, 600) - 0.5) {
+        } else if (rebuffering.current && (b >= Math.min(want, 600) - 0.5 || (tr.lead.ended() && b > 0.3))) {
           rebuffering.current = false;
           tr.main.play();
         }
+        const left = rebuffering.current && !tr.lead.ended() ? Math.max(1, Math.ceil(Math.min(want, 600) - b)) : null;
+        setHold((h) => (h === left ? h : left));
       }
       // the backing follows the picture: while the picture plays, so does the backing (even if the
       // lead is waiting for it to catch up: what the picture needs is already in the buffer)
@@ -627,7 +645,14 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
       const md = MODELS.kara2;
       extPost({ type: 'setmode', mode: m === 'ai' ? 'ai' : 'classic', modelUrl: MODEL_BASE + md.file, ortBase: ORT_BASE, model: 'kara2' } as any);
       const tr = transport.current;
-      if (tr instanceof DualTransport) tr.ahead = 2;
+      if (tr instanceof DualTransport && !tr.started) tr.ahead = 2; // still counting down: just wait less
+      else if (tr instanceof DualTransport) {
+        tr.ahead = 2;
+        // the backing for the new choice starts where the picture is now: the picture waits for it
+        rebuffering.current = true;
+        tr.main.pause();
+        tr.seek(tr.time(), true);
+      }
     }
   };
 
@@ -664,7 +689,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
       // how much backing to prepare before the picture starts: fast backing 2 s; AI enough that this
       // computer, at its measured speed, is never caught up before the end of the song
       const need = () => {
-        if (!ai || extRef.current.fellBack) return 2;
+        if (bmodeRef.current !== 'ai' || extRef.current.fellBack) return 2;
         const sp = aiSpeed();
         if (!sp) return performance.now() - t0 > 40000 ? -1 : LEAD; // model still loading
         return aiNeed(sp, tr.duration() || 300);
@@ -788,6 +813,21 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
             {isDemo && <div className="demo-art">♪ Do · Re · Mi · Fa · Sol</div>}
             {own && !local?.video && <div className="demo-art">♪ {title}</div>}
             {ytErr && <div className="overlay error">{t(ytErr)}</div>}
+            {phase === 'live' && backing && hold !== null && (
+              <div className="overlay hold">
+                <p>
+                  {bmode === 'ai' && !extRef.current.fellBack ? '✨ AI 伴奏準備中' : '⚡ 伴奏準備中'}，還要約 <strong>{hold}</strong> 秒
+                </p>
+                {bmode === 'ai' && aiSpeed() > 0 && aiSpeed() < 1.15 && (
+                  <p className="muted small">你的電腦算 AI 是 {aiSpeed().toFixed(1)} 倍速，比歌慢，所以要先多算一段</p>
+                )}
+                {bmode === 'ai' && (
+                  <button className="btn primary" onClick={() => pickMode('fast')}>
+                    ⚡ 改用快速伴奏（馬上繼續）
+                  </button>
+                )}
+              </div>
+            )}
             {localErr && <div className="overlay error">{t('mine.missing')}</div>}
             {own && !local && !localErr && <div className="overlay">{t('mine.loading')}</div>}
             {phase === 'ready' && !ytErr && (!own || local) && (
@@ -887,7 +927,16 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
             </div>
           )}
           {lyricsNote && <p className="muted small lyric-src">{lyricsNote}</p>}
-          {countdown > 0 && <div className="notice ok countdown">🎛️ {t('ext.countdown', { n: countdown })}</div>}
+          {countdown > 0 && (
+            <div className="notice ok countdown">
+              🎛️ {t('ext.countdown', { n: countdown })}
+              {bmode === 'ai' && countdown > 5 && (
+                <button className="btn small primary" style={{ marginLeft: 10 }} onClick={() => pickMode('fast')}>
+                  ⚡ 改用快速伴奏（馬上開始）
+                </button>
+              )}
+            </div>
+          )}
           {saved?.kind === 'lrc' && phase === 'live' && (
             <div className="row center lyric-nudge">
               <button className="btn small" onClick={() => ((manualLyrics.current = true), patchChart({ offsetMs: (saved.offsetMs ?? 0) - 500 }))}>
@@ -959,6 +1008,9 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
                 {diagOpen ? t('ext.diagHide') : t('ext.diagShow')}
               </button>
               {diagOpen && <pre className="diag-pre">{diagText()}</pre>}
+              <a className="small" href="extension.html" target="_blank" rel="noopener">
+                {ext.present ? `擴充功能 v${ext.version} · 檢查更新／選版本` : '安裝擴充功能'}
+              </a>
               {!ext.present && (
                 <p className="muted small">
                   {t('ext.install')}{' '}

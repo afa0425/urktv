@@ -7,6 +7,7 @@ const common = { bundle: true, minify: true, target: 'chrome120', logLevel: 'inf
 await build({ ...common, entryPoints: ['src/bridge.ts'], outfile: out + '/bridge.js', format: 'iife' });
 await build({ ...common, entryPoints: ['src/tap.ts'], outfile: out + '/tap.js', format: 'iife' });
 await build({ ...common, entryPoints: ['src/background.ts'], outfile: out + '/background.js', format: 'esm' });
+await build({ ...common, entryPoints: ['src/aiworker.ts'], outfile: out + '/aiworker.js', format: 'esm' });
 await build({ ...common, entryPoints: ['src/offscreen.ts'], outfile: out + '/offscreen.js', format: 'esm' });
 for (const f of ['manifest.json', 'offscreen.html', 'icon128.png']) if (existsSync(f)) copyFileSync(f, `${out}/${f}`);
 const ortDir = '../node_modules/onnxruntime-web/dist/';

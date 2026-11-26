@@ -502,12 +502,13 @@ export class DualTransport implements Transport {
    * Jump: both players go to t; the lead plays from there and the picture waits until the lead is
    * `ahead` seconds in again (the AI needs that audio before the picture gets there).
    */
-  seek(t: number) {
+  seek(t: number, fresh = false) {
     t = Math.max(0, t);
     if (this.solo) return this.main.seek(t);
+    if (fresh) this.waiting = null;
     // inside what the lead has already played (and the extension already turned into backing):
     // just move the picture, the backing follows at once
-    if (t >= this.main.time() && t <= this.lead.time() - 1) {
+    if (!fresh && t >= this.main.time() && t <= this.lead.time() - 1) {
       this.main.seek(t);
       return;
     }
@@ -536,7 +537,7 @@ export class DualTransport implements Transport {
     if (this.solo || !this.started) return;
     const gap = this.lead.time() - this.main.time();
     if (this.waiting === 'main') {
-      if (gap >= this.ahead - 0.3) {
+      if (gap >= this.ahead - 0.3 || this.lead.ended()) {
         this.waiting = null;
         this.main.play();
       }

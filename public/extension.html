@@ -15,6 +15,10 @@
   .btn { display: inline-block; padding: 12px 22px; border-radius: 12px; font-weight: 800; text-decoration: none;
          color: #1a0f16; background: linear-gradient(135deg, #ff5c8a, #ffb347); }
   a { color: #ffb347; }
+  .vlist { list-style: none; padding: 0; margin: 6px 0 0; }
+  .vlist li { display: flex; gap: 10px; align-items: baseline; border-top: 1px solid rgba(255,255,255,.08); padding: 8px 0; margin: 0; }
+  .vlist b { min-width: 4.5em; } .tag { font-size: .8rem; background: #ff5c8a; color: #1a0f16; border-radius: 6px; padding: 0 6px; }
+  .ok { color: #5df2b6; } .warn { color: #ffb347; }
 </style>
 </head>
 <body>
@@ -23,12 +27,18 @@
   <h1>安裝「URKTV 即時伴奏」擴充功能</h1>
   <p class="muted">裝了以後，用電腦的 Chrome 唱歌庫裡的歌，就能唱沒有原唱的伴奏版。原唱是在你自己的電腦上即時拿掉的：聲音不上傳、不存檔。手機暫時不支援。</p>
 
-  <p><a class="btn" href="urktv-extension.zip" download>下載擴充功能（zip）</a></p>
+  <div class="card" id="ver">
+    <div id="mine" class="muted">正在檢查你裝的版本…</div>
+    <p><a class="btn" id="dl" href="urktv-extension.zip" download>下載最新版</a></p>
+    <strong>選擇版本</strong>
+    <ul id="list" class="vlist"></ul>
+  </div>
 
   <div class="card">
     <strong>安裝步驟（測試版，約 1 分鐘）</strong>
     <ol>
-      <li>把下載的 <code>urktv-extension.zip</code> 解壓縮，得到一個資料夾（放在不會被刪掉的地方）。</li>
+      <li>要更新：先在 <code>chrome://extensions</code> 把舊的 URKTV 移除。</li>
+      <li>把下載的 zip 解壓縮，得到一個資料夾（放在不會被刪掉的地方）。</li>
       <li>在 Chrome 網址列輸入 <code>chrome://extensions</code>，按 Enter。</li>
       <li>打開右上角的「<strong>開發人員模式</strong>」。</li>
       <li>按「<strong>載入未封裝項目</strong>」，選剛剛解壓縮的資料夾。</li>
@@ -41,11 +51,33 @@
     <ul>
       <li>戴耳機唱，評分最準。</li>
       <li>有獨立顯示卡的電腦：Windows「設定 → 系統 → 顯示器 → 圖形」把 Chrome 設成「高效能」，AI 去人聲會快很多。</li>
-      <li>電腦跑不動 AI 時，會自動改用傳統消人聲，照樣能唱。</li>
+      <li>唱歌時影片下面可以選：原唱／快速伴奏（馬上開始，人聲有點悶）／AI 伴奏（最乾淨，慢的電腦要先等）。</li>
       <li>想知道你的電腦夠不夠快：<a href="bench.html">去人聲測速</a>。</li>
     </ul>
   </div>
   <p class="muted">測試版尚未上架 Chrome 線上應用程式商店，所以要用開發人員模式安裝。</p>
 </main>
+<script>
+  // versions to choose from, and which one is installed (the extension answers on this site)
+  let latest = null, installed = null;
+  const showMine = () => {
+    const el = document.getElementById('mine');
+    if (!installed) { el.textContent = '這台電腦還沒裝（或剛裝好，重新整理一下）。'; el.className = 'muted'; return; }
+    if (latest && installed !== latest) { el.innerHTML = '你裝的是 <b>' + installed + '</b>，最新是 <b>' + latest + '</b>：請先到 chrome://extensions 移除舊的，再裝新的。'; el.className = 'warn'; }
+    else { el.innerHTML = '你裝的是 <b>' + installed + '</b>' + (latest ? '，已經是最新版 ✓' : ''); el.className = 'ok'; }
+  };
+  addEventListener('message', (e) => { if (e.source === window && e.data && e.data.source === 'urktv-ext' && e.data.type === 'ready') { installed = e.data.version; showMine(); } });
+  setTimeout(() => postMessage({ source: 'urktv-page', type: 'hello' }, location.origin), 0);
+  setTimeout(showMine, 1500);
+  fetch('ext/versions.json', { cache: 'no-cache' }).then((r) => r.json()).then((v) => {
+    latest = v.latest;
+    const dl = document.getElementById('dl');
+    dl.textContent = '下載最新版 ' + v.latest; dl.href = 'ext/urktv-extension-' + v.latest + '.zip';
+    document.getElementById('list').innerHTML = v.versions.map((r) =>
+      '<li><b>' + r.version + '</b>' + (r.latest ? '<span class="tag">最新</span>' : '') +
+      '<span class="muted" style="flex:1">' + r.date + '・' + r.note + '</span><a href="' + r.file + '" download>下載</a></li>').join('');
+    showMine();
+  }).catch(() => {});
+</script>
 </body>
 </html>

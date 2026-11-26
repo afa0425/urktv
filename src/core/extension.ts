@@ -3,7 +3,7 @@
 import { useSyncExternalStore } from 'react';
 
 export interface ExtStatus {
-  state: 'loading' | 'running' | 'fallback' | 'error';
+  state: 'loading' | 'running' | 'fallback' | 'error' | 'lost';
   mode?: string;
   speed?: number;
   buffered?: number;
@@ -39,7 +39,7 @@ if (typeof window !== 'undefined') {
         if (m.state !== 'error') return;
       }
       if (m.state === 'fallback') set({ fellBack: true });
-      set({ status: { state: m.state, mode: m.mode, speed: m.speed, buffered: m.buffered, message: m.message, diag: m.diag } });
+      set({ status: { state: m.state, mode: m.mode, speed: m.speed, buffered: m.buffered, message: m.message, diag: m.diag, at: performance.now() } as any });
     }
   });
   // ask: the extension answers if it is installed

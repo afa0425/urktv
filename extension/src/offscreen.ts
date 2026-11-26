@@ -1,7 +1,6 @@
 // The engine: turns the lead player's audio into backing track + guide vocal, ahead of the visible
 // (muted) player, and plays it in time with that player. Runs only on this computer; nothing is stored.
 import { detectPitch, freqToMidi } from '../../src/audio/pitch';
-import * as ort from 'onnxruntime-web/webgpu';
 import { MODELS, _Spectral, type MdxConfig } from '../../src/separate/mdx';
 import { FFT } from '../../src/separate/fft';
 import { decode16, type PageMsg, type TapBlock } from './protocol';
@@ -21,7 +20,7 @@ const S = {
   mode: 'auto' as 'auto' | 'ai' | 'classic',
   using: 'classic' as 'ai' | 'classic',
   cfg: null as (MdxConfig & { file: string }) | null,
-  session: null as ort.InferenceSession | null,
+  session: null as Worker | null, // the AI model, in its own worker
   sp: null as _Spectral | null,
   // input from the lead player
   t0: 0,
@@ -80,6 +79,7 @@ const toPage = (msg: unknown) => chrome.runtime.sendMessage({ to: 'page', msg })
 
 function reset(t: number) {
   S.resets++;
+  aiAbort(false);
   classicReset();
   S.t0 = t;
   S.len = 0;
@@ -141,13 +141,16 @@ function classic(l: Float32Array, r: Float32Array) {
   const vR: number[] = [];
   const re = [new Float64Array(CN), new Float64Array(CN)];
   const im = [new Float64Array(CN), new Float64Array(CN)];
-  for (let i = 0; i < l.length; i++) {
-    // shift one sample into the history
-    C.inL.copyWithin(0, 1);
-    C.inR.copyWithin(0, 1);
-    C.inL[CN - 1] = l[i];
-    C.inR[CN - 1] = r[i];
-    if (++C.fill < CH) continue;
+  for (let i = 0; i < l.length; ) {
+    // shift up to one hop of samples into the history at once
+    const take = Math.min(CH - C.fill, l.length - i);
+    C.inL.copyWithin(0, take);
+    C.inR.copyWithin(0, take);
+    C.inL.set(l.subarray(i, i + take), CN - take);
+    C.inR.set(r.subarray(i, i + take), CN - take);
+    i += take;
+    C.fill += take;
+    if (C.fill < CH) continue;
     C.fill = 0;
     // one frame
     for (let k = 0; k < CN; k++) {
@@ -212,12 +215,28 @@ function classic(l: Float32Array, r: Float32Array) {
   return { inst: [Float32Array.from(outL), Float32Array.from(outR)], voc: [Float32Array.from(vL), Float32Array.from(vR)] };
 }
 
+const aiWait = new Map<number, { ok: (d: Float32Array) => void; bad: (e: Error) => void }>();
+let aiId = 0;
+function aiRun(spec: Float32Array, dims: number[]): Promise<Float32Array> {
+  const id = ++aiId;
+  return new Promise((ok, bad) => {
+    aiWait.set(id, { ok, bad });
+    S.session!.postMessage({ type: 'run', id, spec, dims }, [spec.buffer]);
+  });
+}
+
+/** Stop waiting for the model (a jump, or a switch to the fast cut); `stop` also frees the CPU. */
+function aiAbort(stop: boolean) {
+  for (const p of aiWait.values()) p.bad(new Error('aborted'));
+  aiWait.clear();
+  if (stop && S.session) {
+    S.session.terminate();
+    S.session = null;
+  }
+}
+
 async function loadModel(url: string, base: string, key: string) {
   void base;
-  ort.env.wasm.wasmPaths = chrome.runtime.getURL('ort/'); // bundled with the extension
-  // extension pages are cross-origin isolated (manifest), so the CPU fallback can use several threads
-  ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.min(8, navigator.hardwareConcurrency || 2) : 1;
-  (ort.env.webgpu as any).powerPreference = 'high-performance';
   let res = await fetch(url);
   let bytes: ArrayBuffer;
   if (res.ok) bytes = await res.arrayBuffer();
@@ -233,14 +252,23 @@ async function loadModel(url: string, base: string, key: string) {
     bytes = buf.buffer;
   }
   const eps = 'gpu' in navigator ? ['webgpu', 'wasm'] : ['wasm'];
-  for (const ep of eps) {
-    try {
-      S.session = await ort.InferenceSession.create(new Uint8Array(bytes), { executionProviders: [ep] });
-      break;
-    } catch {
-      /* next */
-    }
-  }
+  const w = new Worker(chrome.runtime.getURL('aiworker.js'), { type: 'module' });
+  await new Promise<void>((ok, bad) => {
+    w.onmessage = (e) => (e.data.type === 'ready' ? ok() : bad(new Error(e.data.message)));
+    w.onerror = (e) => bad(new Error(e.message || 'AI worker failed'));
+    w.postMessage(
+      { type: 'init', bytes, eps, wasmPaths: chrome.runtime.getURL('ort/'), threads: Math.max(1, Math.min(8, (navigator.hardwareConcurrency || 2) - 2)) },
+      [bytes],
+    );
+  });
+  w.onmessage = (e) => {
+    const p = aiWait.get(e.data.id);
+    if (!p) return;
+    aiWait.delete(e.data.id);
+    if (e.data.type === 'out') p.ok(e.data.data);
+    else p.bad(new Error(e.data.message));
+  };
+  S.session = w;
   S.cfg = MODELS[key];
   S.sp = new _Spectral(S.cfg);
 }
@@ -288,8 +316,21 @@ async function work() {
       const spec = new Float32Array(4 * cfg.dimF * cfg.dimT);
       const t1 = performance.now();
       sp.stft([wl, wr], spec);
-      const out = await S.session!.run({ [S.session!.inputNames[0]]: new ort.Tensor('float32', spec, [1, 4, cfg.dimF, cfg.dimT]) });
-      const [yl, yr] = sp.istft(out[S.session!.outputNames[0]].data as Float32Array);
+      const gen0 = S.resets;
+      let out: Float32Array;
+      try {
+        out = await aiRun(spec, [1, 4, cfg.dimF, cfg.dimT]);
+      } catch (e: any) {
+        if (e?.message === 'aborted') {
+          if (!S.running) break;
+          continue;
+        }
+        throw e;
+      }
+      if (!S.running) break;
+      // a jump happened while the model worked: this window belongs to the old place, drop it
+      if (gen0 !== S.resets || S.using !== 'ai') continue;
+      const [yl, yr] = sp.istft(out);
       const secs = (performance.now() - t1) / 1000;
       S.speed = gen / RATE / secs;
       const prim = [yl.subarray(trim, trim + gen), yr.subarray(trim, trim + gen)].map((c) => c.map((v) => v * cfg.compensate));
@@ -371,7 +412,12 @@ setInterval(() => {
   }
 }, 250);
 
-chrome.runtime.onMessage.addListener((m: any) => {
+let lostAt = 0;
+chrome.runtime.onMessage.addListener((m: any, _s: unknown, reply: (x: unknown) => void) => {
+  if (m?.to === 'engine-diag') {
+    reply({ blocks: S.blocks, lastTap: S.lastTap, busy: S.busy, using: S.using, running: S.running, len: S.len, done: S.done, segs: S.segs.length, clock: S.clock, up: performance.now() / 1000 });
+    return;
+  }
   if (m?.to !== 'engine') return;
   const msg = m.msg as PageMsg | TapBlock;
   if (msg.type === 'tap') {
@@ -396,13 +442,19 @@ chrome.runtime.onMessage.addListener((m: any) => {
       S.using = 'classic'; // until the model is ready
       toPage({ type: 'status', state: 'loading' });
       S.loadingModel = true;
-      loadModel(msg.modelUrl, msg.ortBase, msg.model)
+      (S.session ? Promise.resolve() : loadModel(msg.modelUrl, msg.ortBase, msg.model))
         .finally(() => (S.loadingModel = false))
         .then(() => {
           S.using = 'ai';
           S.done = Math.max(0, S.len - (S.cfg!.nFft / 2)); // continue from here with the model
         })
         .catch((e) => toPage({ type: 'status', state: 'fallback', mode: 'classic', message: String(e?.message ?? e) }));
+    }
+  } else if (msg.type === 'clock' && !S.running) {
+    // the page is singing but this engine never got a start (Chrome reopened it): ask for one
+    if (performance.now() - lostAt > 1000) {
+      lostAt = performance.now();
+      toPage({ type: 'status', state: 'lost' });
     }
   } else if (msg.type === 'clock') {
     const jumped = Math.abs(msg.t - nowMedia()) > 0.5;
@@ -413,9 +465,11 @@ chrome.runtime.onMessage.addListener((m: any) => {
     const mm = msg as any;
     const m = mm.mode as 'ai' | 'classic';
     S.mode = m;
-    if (m === 'classic' && S.using === 'ai') {
+    if (m === 'classic') {
+      if (S.using === 'ai') S.done = S.len; // classic continues from the live edge
       S.using = 'classic';
-      S.done = S.len; // classic continues from the live edge
+      aiAbort(true);
+      void work();
     } else if (m === 'ai' && S.using === 'classic') {
       // the singer switched to the AI mid-song: load it if needed, then continue from the live edge
       const go = () => {
