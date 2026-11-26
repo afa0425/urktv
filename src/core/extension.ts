@@ -58,3 +58,9 @@ export const useExtension = () =>
 
 /** How far the hidden-lead player runs ahead of the visible one (seconds): room for the AI to work. */
 export const LEAD = 9;
+
+/** The newest extension version (the one the site offers). */
+export const EXT_LATEST: string = __EXT_VERSION__;
+const num = (v: string) => v.split('.').map(Number).reduce((a, x) => a * 1000 + (x || 0), 0);
+/** The installed extension is older than the one the site offers. */
+export const extOutdated = (v?: string) => !!v && num(v) < num(EXT_LATEST);

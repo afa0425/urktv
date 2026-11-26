@@ -6,6 +6,7 @@ import { Stage } from './ui/Stage';
 import { HistoryView, QueueView, Result, SettingsView } from './ui/Views';
 import { Home } from './ui/Home';
 import { MineView } from './ui/Mine';
+import { ExtUpdate } from './ui/ExtUpdate';
 
 type Tab = 'home' | 'mine' | 'queue' | 'history' | 'settings';
 type View =
@@ -76,6 +77,7 @@ export function App() {
         </nav>
       </header>
       <main>
+        <ExtUpdate />
         {view.name === 'home' && <Home onSing={sing} onMine={() => setView({ name: 'mine' })} />}
         {view.name === 'mine' && <MineView onSing={sing} />}
         {view.name === 'queue' && <QueueView onSing={singFromQueue} />}

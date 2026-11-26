@@ -30,8 +30,6 @@
   <div class="card" id="ver">
     <div id="mine" class="muted">正在檢查你裝的版本…</div>
     <p><a class="btn" id="dl" href="urktv-extension.zip" download>下載最新版</a></p>
-    <strong>選擇版本</strong>
-    <ul id="list" class="vlist"></ul>
   </div>
 
   <div class="card">
@@ -69,13 +67,10 @@
   addEventListener('message', (e) => { if (e.source === window && e.data && e.data.source === 'urktv-ext' && e.data.type === 'ready') { installed = e.data.version; showMine(); } });
   setTimeout(() => postMessage({ source: 'urktv-page', type: 'hello' }, location.origin), 0);
   setTimeout(showMine, 1500);
-  fetch('ext/versions.json', { cache: 'no-cache' }).then((r) => r.json()).then((v) => {
-    latest = v.latest;
+  fetch('ext/version.txt', { cache: 'no-cache' }).then((r) => r.text()).then((v) => {
+    latest = v.trim();
     const dl = document.getElementById('dl');
-    dl.textContent = '下載最新版 ' + v.latest; dl.href = 'ext/urktv-extension-' + v.latest + '.zip';
-    document.getElementById('list').innerHTML = v.versions.map((r) =>
-      '<li><b>' + r.version + '</b>' + (r.latest ? '<span class="tag">最新</span>' : '') +
-      '<span class="muted" style="flex:1">' + r.date + '・' + r.note + '</span><a href="' + r.file + '" download>下載</a></li>').join('');
+    dl.textContent = '下載最新版 ' + latest;
     showMine();
   }).catch(() => {});
 </script>

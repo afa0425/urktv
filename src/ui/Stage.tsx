@@ -12,6 +12,7 @@ import { runWorker } from '../separate/client';
 import { fromInt16, getLocal, isLocal } from '../separate/db';
 import { computeHighlights, isCatalog, loadCatalog, type Layered } from '../core/catalog';
 import { LiveNotes } from '../core/liveNotes';
+import { ExtUpdate } from './ExtUpdate';
 import { drawDualLane, meanOffset, type DualState } from './dualLane';
 import { useT, type I18nKey } from '../i18n';
 import { drawLane, nearestNote, type LaneState, type TracePoint } from './lane';
@@ -805,6 +806,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
         <h1 className="stage-title">{isDemo ? t('stage.demoTitle') : title}</h1>
         <span className={'chip ' + (guide ? 'chip-on' : '')}>{t(guide ? 'stage.mode.guide' : 'stage.mode.free')}</span>
       </header>
+      <ExtUpdate />
 
       <div className="stage-grid">
         <section className="stage-main">
@@ -1009,7 +1011,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
               </button>
               {diagOpen && <pre className="diag-pre">{diagText()}</pre>}
               <a className="small" href="extension.html" target="_blank" rel="noopener">
-                {ext.present ? `擴充功能 v${ext.version} · 檢查更新／選版本` : '安裝擴充功能'}
+                {ext.present ? `擴充功能 v${ext.version}` : '安裝擴充功能'}
               </a>
               {!ext.present && (
                 <p className="muted small">
