@@ -22,6 +22,29 @@ def mp3(src: Path, dst: Path, mono: bool, kbps: int) -> None:
     subprocess.run(cmd + ['-b:a', f'{kbps}k', str(dst)], check=True)
 
 
+def build_package(song: dict, slug: str, title: str, artist: str, video: str, offset: float, audio: bool = False) -> dict:
+    """The site's song file: notes, per-character lyrics, pitch curve, highlights. No audio."""
+    r2 = lambda x: round(float(x), 2)  # noqa: E731
+    notes = [{'s': r2(n['start']), 'e': r2(n['end']), 'm': r2(n.get('f0_median', n['midi'])),
+              't': n.get('techniques', [])} for n in song['notes']]
+    # pitch curve every 20 ms (enough to draw the original's slides and vibrato)
+    f0 = song['f0']
+    step = max(1, round(0.02 / f0['hop']))
+    curve = [None if v is None else round(v, 1) for v in f0['midi'][::step]]
+    lyrics = []
+    for l in (song.get('lyrics') or {}).get('lines', []):
+        lyrics.append({'s': r2(l['start']), 'e': r2(l['end']), 'text': l['text'],
+                       'chars': [[r2(c['start']), r2(c['end']), c['text']] for c in l['chars']]})
+    pkg = {
+        'v': 1, 'audio': audio, 'slug': slug, 'title': title, 'artist': artist,
+        'duration': song['duration'], 'video': {'id': video, 'offset': offset} if video else None,
+        'key': song.get('key'), 'range': song.get('range'), 'tempo': song.get('tempo_bpm'),
+        'notes': notes, 'curve': {'hop': step * f0['hop'], 'midi': curve},
+        'lyrics': lyrics, 'highlights': song.get('highlights', []), 'breaths': song.get('breaths', []),
+    }
+    return pkg
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument('out', type=Path)
@@ -44,24 +67,7 @@ def main() -> None:
         mp3(a.out / 'instrumental.wav', d / 'instrumental.mp3', False, 192)
         mp3(a.out / 'lead.wav', d / 'guide.mp3', True, 128)
 
-    r2 = lambda x: round(float(x), 2)  # noqa: E731
-    notes = [{'s': r2(n['start']), 'e': r2(n['end']), 'm': r2(n.get('f0_median', n['midi'])),
-              't': n.get('techniques', [])} for n in song['notes']]
-    # pitch curve every 20 ms (enough to draw the original's slides and vibrato)
-    f0 = song['f0']
-    step = max(1, round(0.02 / f0['hop']))
-    curve = [None if v is None else round(v, 1) for v in f0['midi'][::step]]
-    lyrics = []
-    for l in (song.get('lyrics') or {}).get('lines', []):
-        lyrics.append({'s': r2(l['start']), 'e': r2(l['end']), 'text': l['text'],
-                       'chars': [[r2(c['start']), r2(c['end']), c['text']] for c in l['chars']]})
-    pkg = {
-        'v': 1, 'audio': not a.no_audio, 'slug': a.slug, 'title': a.title, 'artist': a.artist,
-        'duration': song['duration'], 'video': {'id': a.video, 'offset': a.video_offset} if a.video else None,
-        'key': song.get('key'), 'range': song.get('range'), 'tempo': song.get('tempo_bpm'),
-        'notes': notes, 'curve': {'hop': step * f0['hop'], 'midi': curve},
-        'lyrics': lyrics, 'highlights': song.get('highlights', []), 'breaths': song.get('breaths', []),
-    }
+    pkg = build_package(song, a.slug, a.title, a.artist, a.video, a.video_offset, audio=not a.no_audio)
     (d / 'song.json').write_text(json.dumps(pkg, ensure_ascii=False, separators=(',', ':')))
 
     idx_path = a.dest / 'index.json'
@@ -71,7 +77,7 @@ def main() -> None:
         'video': a.video, 'key': song.get('key'), 'highest': (song.get('range') or {}).get('highest'),
     }]
     idx_path.write_text(json.dumps(idx, ensure_ascii=False, indent=1))
-    print(f'packed {a.slug}: {len(notes)} notes, {len(lyrics)} lyric lines -> {d}')
+    print(f"packed {a.slug}: {len(pkg['notes'])} notes, {len(pkg['lyrics'])} lyric lines -> {d}")
 
 
 if __name__ == '__main__':

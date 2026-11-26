@@ -13,3 +13,20 @@ python3 deploy/deploy.py <帳戶ID> /tmp/site urktv
 
 `deploy.py` 用 `Authorization: Bearer proxy-injected` 呼叫 API：在 Claude 的雲端環境裡，
 真正的金鑰由環境的網路代理帶入；在自己電腦上跑，請把那個值換成你的金鑰（例如從環境變數讀）。
+
+## 共享歌庫（`/api/`）
+
+網站本身不附帶歌；歌單和每首歌的灰條、歌詞時間都存在共享歌庫（KV 命名空間 `urktv-songs`），
+**只收灰條和歌詞，拒收任何音檔**。
+
+| 路徑 | 做什麼 |
+| --- | --- |
+| `GET /api/songs` | 歌單 |
+| `GET /api/songs/<slug>` | 一首歌的灰條、歌詞、音高曲線 |
+| `POST /api/songs` | 上傳（匯入工具用；要 `rights: true`，帶音檔一律拒收） |
+| `POST /api/report` | 回報問題 |
+| `DELETE /api/songs/<slug>` | 下架（要 `x-admin-key`，版權申訴用） |
+
+上傳：`URKTV_PASS=<網站密碼> python pipeline/upload.py <拆解結果資料夾> --slug ... --title ... --video <YouTube ID> --site <網址> --i-have-rights`
+
+設定管理金鑰：`python3 deploy/deploy.py <帳戶ID> <網站資料夾> urktv --worker-only --admin-key=<金鑰>`

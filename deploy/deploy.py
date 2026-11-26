@@ -61,10 +61,18 @@ if not SKIP_FILES:
         call('POST', f"/storage/kv/namespaces/{ns['id']}/bulk/delete", stale[i:i + 1000])
     print(f'  removed {len(stale)} old files' + (f": {', '.join(x for x in stale if 'catalog' in x)}" if stale else ''))
 
+# shared song library (notes + lyric timing uploaded by importers); separate from the site files
+songs_title = f'{NAME}-songs'
+songs_ns = next((n for n in call('GET', '/storage/kv/namespaces?per_page=100')['result'] if n['title'] == songs_title), None)
+if not songs_ns:
+    songs_ns = call('POST', '/storage/kv/namespaces', {'title': songs_title})['result']
+print('song library', songs_ns['id'])
+
 # 3. the Worker (password: set once with --password; kept afterwards)
 pw = next((a.split('=', 1)[1] for a in sys.argv if a.startswith('--password=')), None)
 meta = {'main_module': 'worker.js', 'compatibility_date': '2026-10-01',
-        'bindings': [{'type': 'kv_namespace', 'name': 'SITE', 'namespace_id': ns['id']}],
+        'bindings': [{'type': 'kv_namespace', 'name': 'SITE', 'namespace_id': ns['id']},
+                     {'type': 'kv_namespace', 'name': 'SONGS', 'namespace_id': songs_ns['id']}],
         'keep_bindings': ['secret_text']}  # keep SITE_USER / SITE_PASS across deploys
 boundary = 'hisingboundary'
 src = open(os.path.join(os.path.dirname(__file__), 'worker.js'), 'rb').read()
@@ -73,10 +81,12 @@ body = (f'--{boundary}\r\nContent-Disposition: form-data; name="metadata"\r\nCon
         'Content-Type: application/javascript+module\r\n\r\n').encode() + src + f'\r\n--{boundary}--\r\n'.encode()
 call('PUT', f'/workers/scripts/{NAME}', body, f'multipart/form-data; boundary={boundary}', raw=True)
 print('worker uploaded')
-if pw:
-    for name, text in (('SITE_USER', 'urktv'), ('SITE_PASS', pw)):
+admin = next((a.split('=', 1)[1] for a in sys.argv if a.startswith('--admin-key=')), None)
+if pw or admin:
+    pairs = ([('SITE_USER', 'urktv'), ('SITE_PASS', pw)] if pw else []) + ([('ADMIN_KEY', admin)] if admin else [])
+    for name, text in pairs:
         call('PUT', f'/workers/scripts/{NAME}/secrets', {'name': name, 'text': text, 'type': 'secret_text'})
-    print('password set')
+    print('secrets set:', ', '.join(n for n, _ in pairs))
 
 # 4. public on workers.dev
 call('POST', f'/workers/scripts/{NAME}/subdomain', {'enabled': True, 'previews_enabled': True})
