@@ -1110,3 +1110,18 @@ a.btn {
 .seek {
   width: 100%;
 }
+
+.diag-btn {
+  align-self: flex-start;
+}
+.diag-pre {
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 0.72rem;
+  background: var(--bg);
+  padding: 8px;
+  border-radius: 8px;
+  max-height: 240px;
+  overflow: auto;
+  margin: 0;
+}

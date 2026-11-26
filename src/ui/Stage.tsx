@@ -100,6 +100,8 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   const ytAny = ytCat || ytPlain;
   const backing = ytAny && ext.present && ext.consent && wantBacking;
   const [backingFailed, setBackingFailed] = useState(false);
+  const [diagOpen, setDiagOpen] = useState(false);
+  const [diagCopied, setDiagCopied] = useState(false);
   const [countdown, setCountdown] = useState(0);
   const mainSince = useRef(0);
   const extRef = useRef(ext);
@@ -691,6 +693,24 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
             <div className="card col">
               <div className="label">{t('ext.title')}</div>
               {backingFailed && <p className="notice warn">{t('ext.failed')}</p>}
+              {/* always here, even when the extension is not detected: that is the case to diagnose */}
+              <button
+                className="btn small diag-btn"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(diagText());
+                    setDiagCopied(true);
+                  } catch {
+                    setDiagOpen(true);
+                  }
+                }}
+              >
+                📋 {diagCopied ? t('ext.diagCopied') : t('ext.diagCopy')}
+              </button>
+              <button className="btn link small" onClick={() => setDiagOpen((o) => !o)}>
+                {diagOpen ? t('ext.diagHide') : t('ext.diagShow')}
+              </button>
+              {diagOpen && <pre className="diag-pre">{diagText()}</pre>}
               {!ext.present && (
                 <p className="muted small">
                   {t('ext.install')}{' '}
@@ -731,13 +751,6 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
                         </span>
                         <input type="range" min={0} max={1} step={0.05} value={vocal} onChange={(e) => changeVocal(Number(e.target.value))} />
                       </label>
-                      <details className="diag">
-                        <summary>{t('ext.diag')}</summary>
-                        <pre>{diagText()}</pre>
-                        <button className="btn small" onClick={() => void navigator.clipboard?.writeText(diagText())}>
-                          {t('ext.diagCopy')}
-                        </button>
-                      </details>
                       {ext.status && (
                         <small className="muted">
                           {ext.status.state === 'error'
