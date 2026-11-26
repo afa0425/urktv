@@ -17,8 +17,11 @@ type Seg = { t: number; inst: Float32Array[]; voc: Float32Array[]; src?: AudioBu
 
 const S = {
   running: false,
-  mode: 'auto' as 'auto' | 'ai' | 'classic',
-  using: 'classic' as 'ai' | 'classic',
+  mode: 'auto' as 'auto' | 'ai' | 'lite' | 'classic',
+  using: 'classic' as 'ai' | 'lite' | 'classic',
+  lite: null as Worker | null, // the light AI (Spleeter 2 stems), in its own worker
+  liteLoading: false,
+  lf: 0, // light AI: next STFT frame to output
   cfg: null as (MdxConfig & { file: string }) | null,
   session: null as Worker | null, // the AI model, in its own worker
   sp: null as _Spectral | null,
@@ -84,6 +87,7 @@ function reset(t: number) {
   S.t0 = t;
   S.len = 0;
   S.done = 0;
+  S.lf = 0;
   for (const s of S.segs) s.src?.forEach((x) => x.stop());
   S.segs = [];
 }
@@ -235,6 +239,159 @@ function aiAbort(stop: boolean) {
   }
 }
 
+/**
+ * The light AI: Spleeter 2 stems (Deezer, open source, MIT) in ONNX. STFT 4096 / hop 1024; the models
+ * see 512 frames (11.9 s) at a time and output vocal / accompaniment magnitudes; their ratio masks the
+ * mix. Each run outputs NEW frames with PAST frames of context before and FUT after.
+ */
+const LN = 4096;
+const LH = 1024;
+const LW = 512;
+const NEW = 176; // 4.1 s out per run
+const FUT = 40; // 0.9 s look-ahead
+const PAST = LW - NEW - FUT;
+const LB = 1024; // bins the model sees (up to 11 kHz); above that everything goes to the backing
+const lWin = new Float64Array(LN).map((_, i) => 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / LN));
+const lFft = new FFT(LN);
+/** Samples of input the next light run needs. */
+const liteNeed = () => (S.lf + NEW + FUT - 1) * LH + LN;
+
+function liteRun(names: string[], spec: Float32Array, dims: number[]): Promise<Float32Array[]> {
+  const id = ++aiId;
+  return new Promise((ok, bad) => {
+    aiWait.set(id, { ok: (_d: Float32Array, all?: Float32Array[]) => ok(all!), bad } as any);
+    S.lite!.postMessage({ type: 'run', id, names, spec, dims }, [spec.buffer]);
+  });
+}
+
+async function fetchModel(url: string): Promise<ArrayBuffer> {
+  const res = await fetch(url);
+  if (res.ok) return res.arrayBuffer();
+  const man = await (await fetch(url + '.parts.json')).json();
+  const buf = new Uint8Array(man.size);
+  let o = 0;
+  for (let i = 0; i < man.parts; i++) {
+    const b = new Uint8Array(await (await fetch(`${url}.part${i}`)).arrayBuffer());
+    buf.set(b, o);
+    o += b.length;
+  }
+  return buf.buffer;
+}
+
+async function loadLite(base: string) {
+  const [voc, acc] = await Promise.all([fetchModel(base + 'spleeter-vocals.onnx'), fetchModel(base + 'spleeter-accompaniment.onnx')]);
+  const w = new Worker(chrome.runtime.getURL('aiworker.js'), { type: 'module' });
+  await new Promise<void>((ok, bad) => {
+    w.onmessage = (e) => (e.data.type === 'ready' ? ok() : bad(new Error(e.data.message)));
+    w.onerror = (e) => bad(new Error(e.message || 'light AI worker failed'));
+    // the light model is small: the CPU is plenty and leaves the graphics card alone
+    w.postMessage(
+      { type: 'init', models: [{ name: 'voc', bytes: voc }, { name: 'acc', bytes: acc }], eps: ['wasm'], wasmPaths: chrome.runtime.getURL('ort/'), threads: Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 2)) },
+      [voc, acc],
+    );
+  });
+  w.onmessage = (e) => {
+    const p = aiWait.get(e.data.id) as any;
+    if (!p) return;
+    aiWait.delete(e.data.id);
+    if (e.data.type === 'out') p.ok(e.data.data, e.data.all);
+    else p.bad(new Error(e.data.message));
+  };
+  S.lite = w;
+}
+
+/** Start using the light AI from where the output has got to. */
+function liteFromHere() {
+  const outEnd = S.using === 'classic' ? Math.max(0, S.len - (CN - CH)) : S.done;
+  S.lf = Math.ceil(outEnd / LH);
+  S.using = 'lite';
+}
+
+/** One light-AI run: frames lf .. lf+NEW-1 become backing + vocal. False if not enough input yet. */
+async function liteStep(): Promise<boolean | 'stale'> {
+  if (S.len < liteNeed()) return false;
+  const f0 = S.lf;
+  const a = f0 - PAST;
+  const t1 = performance.now();
+  const keep0 = f0 - 3; // frames that reach into the output region
+  const keepN = NEW + 3;
+  const X: { re: Float32Array; im: Float32Array }[][] = [[], []];
+  const mag = new Float32Array(2 * LW * LB);
+  const re = new Float64Array(LN);
+  const im = new Float64Array(LN);
+  for (let c = 0; c < 2; c++) {
+    const src = c ? S.R : S.L;
+    for (let f = 0; f < LW; f++) {
+      const st = (a + f) * LH;
+      for (let i = 0; i < LN; i++) {
+        const j = st + i;
+        re[i] = j >= 0 && j < S.len ? src[j] * lWin[i] : 0;
+        im[i] = 0;
+      }
+      lFft.transform(re, im);
+      const o = (c * LW + f) * LB;
+      for (let k = 0; k < LB; k++) mag[o + k] = Math.hypot(re[k], im[k]);
+      const kf = a + f - keep0;
+      if (kf >= 0 && kf < keepN) X[c][kf] = { re: Float32Array.from(re.subarray(0, LN / 2 + 1)), im: Float32Array.from(im.subarray(0, LN / 2 + 1)) };
+    }
+  }
+  const gen0 = S.resets;
+  const [v, ac] = await liteRun(['voc', 'acc'], mag, [2, 1, LW, LB]);
+  if (gen0 !== S.resets) return 'stale';
+  // mask, inverse STFT, overlap-add over the output region
+  const r0 = f0 * LH;
+  const len = NEW * LH;
+  const inst = [new Float32Array(len), new Float32Array(len)];
+  const voc = [new Float32Array(len), new Float32Array(len)];
+  const ir = new Float64Array(LN);
+  const ii = new Float64Array(LN);
+  const vr = new Float64Array(LN);
+  const vi = new Float64Array(LN);
+  const norm = 1 / (LN * 1.5); // inverse FFT scale; hann² at 75 % overlap sums to 1.5
+  for (let c = 0; c < 2; c++) {
+    for (let kf = 0; kf < keepN; kf++) {
+      const fr = X[c][kf];
+      const f = keep0 + kf - a; // index in the model's window
+      const o = (c * LW + f) * LB;
+      for (let k = 0; k <= LN / 2; k++) {
+        let m = 1;
+        if (k < LB) {
+          const va = v[o + k] * v[o + k];
+          const aa = ac[o + k] * ac[o + k];
+          m = (aa + 5e-11) / (va + aa + 1e-10);
+        }
+        ir[k] = fr.re[k] * m;
+        ii[k] = fr.im[k] * m;
+        vr[k] = fr.re[k] - ir[k];
+        vi[k] = fr.im[k] - ii[k];
+        if (k > 0 && k < LN / 2) {
+          ir[LN - k] = ir[k];
+          ii[LN - k] = -ii[k];
+          vr[LN - k] = vr[k];
+          vi[LN - k] = -vi[k];
+        }
+      }
+      lFft.transform(ir, ii, true);
+      lFft.transform(vr, vi, true);
+      const st = (keep0 + kf) * LH - r0;
+      for (let i = 0; i < LN; i++) {
+        const j = st + i;
+        if (j < 0 || j >= len) continue;
+        const g = lWin[i] * norm;
+        inst[c][j] += ir[i] * g;
+        voc[c][j] += vr[i] * g;
+      }
+    }
+  }
+  S.speed = len / RATE / ((performance.now() - t1) / 1000);
+  const t = S.t0 + r0 / RATE;
+  S.segs.push({ t, inst, voc });
+  pitchFeed(t, voc);
+  S.lf += NEW;
+  S.done = (f0 + NEW) * LH;
+  return true;
+}
+
 async function loadModel(url: string, base: string, key: string) {
   void base;
   let res = await fetch(url);
@@ -279,6 +436,22 @@ async function work() {
   S.busy = true;
   try {
     for (;;) {
+      if (S.using === 'lite') {
+        let r: boolean | 'stale';
+        try {
+          r = await liteStep();
+        } catch (e: any) {
+          if (e?.message === 'aborted') {
+            if (!S.running) break;
+            continue;
+          }
+          throw e;
+        }
+        if (!S.running) break;
+        if (r === 'stale') continue;
+        if (!r) break;
+        continue;
+      }
       if (S.using === 'classic') {
         const n = S.len - S.done;
         if (n < 2048) break;
@@ -330,6 +503,7 @@ async function work() {
       if (!S.running) break;
       // a jump happened while the model worked: this window belongs to the old place, drop it
       if (gen0 !== S.resets || S.using !== 'ai') continue;
+      void 0;
       const [yl, yr] = sp.istft(out);
       const secs = (performance.now() - t1) / 1000;
       S.speed = gen / RATE / secs;
@@ -412,6 +586,30 @@ setInterval(() => {
   }
 }, 250);
 
+/** Use the light AI; the classic cut fills in while it loads (and if it cannot load). */
+function startLite(base: string) {
+  if (S.lite) {
+    if (S.using !== 'lite') liteFromHere();
+    void work();
+    return;
+  }
+  S.using = 'classic';
+  if (S.liteLoading || !base) return;
+  S.liteLoading = true;
+  S.loadingModel = true;
+  loadLite(base)
+    .finally(() => {
+      S.liteLoading = false;
+      S.loadingModel = false;
+    })
+    .then(() => {
+      if (S.mode !== 'lite') return;
+      liteFromHere();
+      void work();
+    })
+    .catch((e) => toPage({ type: 'status', state: 'fallback', mode: 'classic', message: 'light AI: ' + String(e?.message ?? e) }));
+}
+
 let lostAt = 0;
 chrome.runtime.onMessage.addListener((m: any, _s: unknown, reply: (x: unknown) => void) => {
   if (m?.to === 'engine-diag') {
@@ -438,6 +636,7 @@ chrome.runtime.onMessage.addListener((m: any, _s: unknown, reply: (x: unknown) =
     void ctx.resume();
     reset(0);
     if (msg.mode === 'classic') S.using = 'classic';
+    else if (msg.mode === 'lite') startLite((msg as any).liteBase);
     else {
       S.using = 'classic'; // until the model is ready
       toPage({ type: 'status', state: 'loading' });
@@ -463,14 +662,25 @@ chrome.runtime.onMessage.addListener((m: any, _s: unknown, reply: (x: unknown) =
   } else if ((msg as any).type === 'setmode') {
     // the page decided: e.g. too slow for the AI even with a long head start -> classic
     const mm = msg as any;
-    const m = mm.mode as 'ai' | 'classic';
+    const m = mm.mode as 'ai' | 'lite' | 'classic';
     S.mode = m;
-    if (m === 'classic') {
+    if (m === 'lite') {
+      if (S.using === 'ai') {
+        aiAbort(true);
+        S.using = 'classic';
+        S.done = S.len;
+      }
+      startLite(mm.liteBase);
+    } else if (m === 'classic') {
       if (S.using === 'ai') S.done = S.len; // classic continues from the live edge
       S.using = 'classic';
       aiAbort(true);
       void work();
-    } else if (m === 'ai' && S.using === 'classic') {
+    } else if (m === 'ai' && S.using !== 'ai') {
+      if (S.using === 'lite') {
+        S.using = 'classic';
+        S.done = S.len;
+      }
       // the singer switched to the AI mid-song: load it if needed, then continue from the live edge
       const go = () => {
         if (S.mode !== 'ai') return;

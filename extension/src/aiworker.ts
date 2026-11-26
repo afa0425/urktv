@@ -1,35 +1,49 @@
-// Runs the AI model off the engine's thread, so the engine keeps taking in the video's sound and
-// playing the backing while the model works.
+// Runs the AI models off the engine's thread, so the engine keeps taking in the video's sound and
+// playing the backing while the models work. Holds one or more named models.
 import * as ort from 'onnxruntime-web/webgpu';
 
-let session: ort.InferenceSession | null = null;
+const sessions = new Map<string, ort.InferenceSession>();
+
+async function create(bytes: ArrayBuffer, eps: string[]) {
+  for (const ep of eps) {
+    try {
+      return { s: await ort.InferenceSession.create(new Uint8Array(bytes), { executionProviders: [ep] }), ep };
+    } catch {
+      /* next */
+    }
+  }
+  throw new Error('model failed to load');
+}
 
 // ORT starts its helper threads from this same file (named em-pthread): leave those to ORT
-if ((self as any).name !== 'em-pthread') self.onmessage = async (e: MessageEvent) => {
-  const m = e.data;
-  try {
-    if (m.type === 'init') {
-      ort.env.wasm.wasmPaths = m.wasmPaths;
-      ort.env.wasm.numThreads = self.crossOriginIsolated ? m.threads : 1;
-      (ort.env.webgpu as any).powerPreference = 'high-performance';
-      let used = '';
-      for (const ep of m.eps as string[]) {
-        try {
-          session = await ort.InferenceSession.create(new Uint8Array(m.bytes), { executionProviders: [ep] });
-          used = ep;
-          break;
-        } catch {
-          /* next */
+if ((self as any).name !== 'em-pthread')
+  self.onmessage = async (e: MessageEvent) => {
+    const m = e.data;
+    try {
+      if (m.type === 'init') {
+        ort.env.wasm.wasmPaths = m.wasmPaths;
+        ort.env.wasm.numThreads = self.crossOriginIsolated ? m.threads : 1;
+        (ort.env.webgpu as any).powerPreference = 'high-performance';
+        const models: { name: string; bytes: ArrayBuffer }[] = m.models ?? [{ name: 'main', bytes: m.bytes }];
+        let used = '';
+        for (const md of models) {
+          const r = await create(md.bytes, m.eps);
+          sessions.set(md.name, r.s);
+          used = r.ep;
         }
+        postMessage({ type: 'ready', ep: used });
+      } else if (m.type === 'run') {
+        // every named model (or just `name`) on the same input; outputs in the same order
+        const names: string[] = m.names ?? ['main'];
+        const outs: Float32Array[] = [];
+        for (const n of names) {
+          const s = sessions.get(n)!;
+          const o = await s.run({ [s.inputNames[0]]: new ort.Tensor('float32', m.spec, m.dims) });
+          outs.push(new Float32Array(o[s.outputNames[0]].data as Float32Array));
+        }
+        (postMessage as any)({ type: 'out', id: m.id, data: outs[0], all: outs }, outs.map((x) => x.buffer));
       }
-      if (!session) throw new Error('model failed to load');
-      postMessage({ type: 'ready', ep: used });
-    } else if (m.type === 'run') {
-      const out = await session!.run({ [session!.inputNames[0]]: new ort.Tensor('float32', m.spec, m.dims) });
-      const data = new Float32Array(out[session!.outputNames[0]].data as Float32Array);
-      (postMessage as any)({ type: 'out', id: m.id, data }, [data.buffer]);
+    } catch (err: any) {
+      postMessage({ type: 'error', id: m.id, message: String(err?.message ?? err) });
     }
-  } catch (err: any) {
-    postMessage({ type: 'error', id: m.id, message: String(err?.message ?? err) });
-  }
-};
+  };

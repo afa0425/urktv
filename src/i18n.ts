@@ -73,7 +73,7 @@ const zh = {
   'ext.on': '唱伴奏版',
   'ext.loading': '正在準備 AI 模型（第一次要下載）…',
   'ext.ai': 'AI 去人聲中（{x} 倍即時）',
-  'ext.classic': '快速伴奏（舊方法，人聲會有點悶）',
+  'ext.classic': '舊方法去人聲（輕量 AI 沒載入）',
   'ext.ahead': '伴奏已備好 {s} 秒',
   'ext.countdown': '正在準備伴奏，約 {n} 秒後開始（電腦越快等越短）…',
   'ext.lead': '原版',

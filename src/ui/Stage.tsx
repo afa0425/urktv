@@ -5,7 +5,7 @@ import { detectKind, lineAt, parseChart, type Chart } from '../core/chart';
 import { foldNear, FreeScorer, GuideScorer, type Difficulty, type ScoreExtras, type Scorer, type ScoreResult } from '../core/score';
 import { charts, DEMO_ID, renameSong, settings, useStore, type Song } from '../core/store';
 import { demoChart, DualTransport, LocalTransport, SynthTransport, toUltraStar, YouTubeTransport, type Transport } from '../core/transport';
-import { extPost, LEAD, useExtension } from '../core/extension';
+import { extPost, LEAD, LITE_AHEAD, useExtension } from '../core/extension';
 import { MODELS } from '../separate/mdx';
 import { MODEL_BASE, ORT_BASE } from '../separate/client';
 import { runWorker } from '../separate/client';
@@ -76,7 +76,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   const [localErr, setLocalErr] = useState(false);
   const [key, setKey] = useState(0);
   const [keyBusy, setKeyBusy] = useState(false);
-  const [vocal, setVocal] = useState(0);
+  const [vocal, setVocal] = useState(1); // the original by default
   const vocalRef = useRef(0);
   vocalRef.current = vocal;
   const base = useRef<{ inst: Float32Array[]; voc: Float32Array[] } | null>(null);
@@ -124,15 +124,21 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   const ytCat = own && !!local && !hasAudio && !!local.video;
   // with the URKTV extension (computer Chrome) the MV's vocal is removed on this computer, live
   const ext = useExtension();
-  const [wantBacking, setWantBacking] = useState(false); // the original MV by default; the singer picks a backing
+  // with the extension, every mode runs through it: the original too (its gray bars and lyric timing
+  // come from the separated vocal); without it, the plain MV
+  const [wantBacking] = useState(true);
   // AI backing (clean, may need a head start) or fast backing (classic cut: starts at once, duller)
-  const [bmode, setBmode] = useState<'ai' | 'fast'>(() => (localStorage.getItem('urktv.bmode') === 'fast' ? 'fast' : 'ai'));
+  const [bmode, setBmode] = useState<'orig' | 'fast' | 'ai'>('orig');
   const bmodeRef = useRef(bmode);
   bmodeRef.current = bmode;
   // any YouTube song can get the live backing track: library songs, and links pasted on Home
   const ytPlain = !own && !isDemo;
   const ytAny = ytCat || ytPlain;
-  const backing = ytAny && ext.present && ext.consent && wantBacking;
+  const backing = ytAny && ext.present && wantBacking;
+  // installing the extension is the consent; the extension still keeps the flag
+  useEffect(() => {
+    if (ext.present && !ext.consent) extPost({ type: 'consent', ok: true });
+  }, [ext.present, ext.consent]);
   const [backingFailed, setBackingFailed] = useState(false);
   const [drag, setDrag] = useState<number | null>(null);
   const [lyricsNote, setLyricsNote] = useState('');
@@ -296,19 +302,17 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
       // the extension's engine was reopened by Chrome and knows nothing: start it again from here
       if (st?.state === 'lost' && tr.started && !tr.solo && performance.now() - lastRestart.current > 3000) {
         lastRestart.current = performance.now();
-        const md = MODELS.kara2;
-        const ai = bmodeRef.current === 'ai' && !extRef.current.fellBack;
-        extPost({ type: 'start', lead: LEAD, vocal: vocalRef.current, mode: ai ? 'ai' : 'classic', modelUrl: MODEL_BASE + md.file, ortBase: ORT_BASE, model: 'kara2' });
+        extPost(startMsg());
         rebuffering.current = true;
         tr.main.pause();
         tr.seek(tr.time(), true);
       }
       if (st?.mode === 'ai' && (st.speed ?? 0) > 0) localStorage.setItem('urktv.aiSpeed', String(st.speed));
-      const aiOn = bmodeRef.current === 'ai' && !extRef.current.fellBack && st?.mode !== 'classic';
       const left = Math.max(0, (tr.duration() || 300) - tr.time());
-      // the lead may run as far ahead as the AI needs; the fast backing needs 2 s
-      const want = aiOn ? aiNeed(aiSpeed() || 1, left) : 2;
-      if (tr.started) tr.ahead = Math.max(2, want);
+      // the lead runs as far ahead as the chosen model needs
+      const pl = plan(left);
+      const want = pl.resume + 0.5;
+      if (tr.started) tr.ahead = Math.max(2, pl.ahead);
       if (!rebuffering.current) tr.keepAhead();
       if (!tr.solo && mainSince.current) {
         // no word from the extension for 2 s: it is stuck, there is no backing to play
@@ -622,38 +626,45 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
     if (st?.mode === 'ai' && (st.speed ?? 0) > 0) return st.speed!;
     return Number(localStorage.getItem('urktv.aiSpeed')) || 0;
   };
+  /** What the extension should run: the high-quality AI, or the light AI (original and fast backing). */
+  const engineMode = () => (bmodeRef.current === 'ai' && !extRef.current.fellBack ? 'ai' : 'lite');
+  const startMsg = () => {
+    const md = MODELS.kara2;
+    return { type: 'start', lead: LEAD, vocal: vocalRef.current, mode: engineMode(), modelUrl: MODEL_BASE + md.file, ortBase: ORT_BASE, model: 'kara2', liteBase: MODEL_BASE };
+  };
+  /** How far ahead the lead player should run, and how much backing to have before (re)starting. */
+  const plan = (left: number) => {
+    const st = extRef.current.status;
+    if (engineMode() === 'ai' && st?.mode !== 'lite') {
+      const n = aiNeed(aiSpeed() || 1, left);
+      return { ahead: n, resume: Math.min(n, 600) - 0.5 };
+    }
+    if (st?.mode === 'classic') return { ahead: 2, resume: 1.5 }; // light AI could not load
+    return { ahead: LITE_AHEAD, resume: 3 };
+  };
   /** Seconds of AI backing to have ready so it lasts `left` seconds of song at speed sp. */
   const aiNeed = (sp: number, left: number) => (sp >= 1.15 ? 8 : Math.min(600, left * (1 / sp - 1) + 8));
 
-  /** The singer picks: original / fast backing / AI backing (both made on their own computer). */
+  /**
+   * The singer picks: original / fast backing (light AI) / AI backing, all made on their own computer.
+   * Original and fast run the same light AI, so switching between them only changes the vocal level.
+   */
   const pickMode = (m: 'orig' | 'fast' | 'ai') => {
-    if (m === 'orig') {
-      if (phase === 'live' && backing) changeVocal(1);
-      else setWantBacking(false);
-      return;
-    }
-    localStorage.setItem('urktv.bmode', m);
+    if (!backing) return; // no extension: the plain MV
+    const before = engineMode();
+    if (m === 'ai') extRef.current.fellBack = false;
+    bmodeRef.current = m;
     setBmode(m);
-    if (!ext.consent) extPost({ type: 'consent', ok: true }); // picking a backing is the consent
-    if (!backing) {
-      setWantBacking(true);
-      if (phase === 'live') setPhase('ready'); // the players are rebuilt: press start again
-      return;
-    }
-    changeVocal(0);
-    if (phase === 'live' && m !== bmode) {
-      extRef.current.fellBack = false;
-      const md = MODELS.kara2;
-      extPost({ type: 'setmode', mode: m === 'ai' ? 'ai' : 'classic', modelUrl: MODEL_BASE + md.file, ortBase: ORT_BASE, model: 'kara2' } as any);
-      const tr = transport.current;
-      if (tr instanceof DualTransport && !tr.started) tr.ahead = 2; // still counting down: just wait less
-      else if (tr instanceof DualTransport) {
-        tr.ahead = 2;
-        // the backing for the new choice starts where the picture is now: the picture waits for it
-        rebuffering.current = true;
-        tr.main.pause();
-        tr.seek(tr.time(), true);
-      }
+    changeVocal(m === 'orig' ? 1 : 0);
+    const after = engineMode();
+    if (phase !== 'live' || before === after) return;
+    extPost({ ...startMsg(), type: 'setmode' });
+    const tr = transport.current;
+    if (tr instanceof DualTransport && tr.started) {
+      // the new model starts where the picture is now: the picture waits for it
+      rebuffering.current = true;
+      tr.main.pause();
+      tr.seek(tr.time(), true);
     }
   };
 
@@ -680,21 +691,11 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
     }
     const tr = transport.current;
     if (tr instanceof DualTransport) {
-      // the lead player starts first; the AI gets LEAD seconds of head start
-      const m = MODELS.kara2;
+      // the lead player starts first and the chosen model gets its head start
       extRef.current.fellBack = false;
-      const ai = bmodeRef.current === 'ai';
-      extPost({ type: 'start', lead: LEAD, vocal, mode: ai ? 'ai' : 'classic', modelUrl: MODEL_BASE + m.file, ortBase: ORT_BASE, model: 'kara2' });
+      extPost(startMsg());
       let started = false;
       const t0 = performance.now();
-      // how much backing to prepare before the picture starts: fast backing 2 s; AI enough that this
-      // computer, at its measured speed, is never caught up before the end of the song
-      const need = () => {
-        if (bmodeRef.current !== 'ai' || extRef.current.fellBack) return 2;
-        const sp = aiSpeed();
-        if (!sp) return performance.now() - t0 > 40000 ? -1 : LEAD; // model still loading
-        return aiNeed(sp, tr.duration() || 300);
-      };
       tr.startStaggered(
         () => {
           started = true;
@@ -702,23 +703,26 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
         },
         () => {
           const st = extRef.current.status;
-          let n = need();
-          if (n === -1) {
-            // the AI never answered on this computer: fast backing, so the song can start
-            extPost({ type: 'setmode', mode: 'classic' });
+          const waited = performance.now() - t0;
+          if (engineMode() === 'ai' && !(aiSpeed() > 0) && waited > 40000) {
+            // the AI never answered on this computer: the light AI, so the song can start
             extRef.current.fellBack = true;
-            n = 2;
+            extPost({ ...startMsg(), type: 'setmode' });
           }
-          tr.ahead = n;
-          return (st?.buffered ?? 0) >= n - 0.5 && tr.lead.time() >= n - 0.5;
+          // the light AI still loading: wait for it (a few seconds), not for the old cut
+          if (engineMode() === 'lite' && st?.mode !== 'lite' && waited < 15000 && !extRef.current.fellBack) return false;
+          if (engineMode() === 'ai' && st?.mode !== 'ai' && !(aiSpeed() > 0)) return false;
+          const pl = plan(tr.duration() || 300);
+          tr.ahead = pl.ahead;
+          return (st?.buffered ?? 0) >= pl.resume && tr.lead.time() >= Math.min(pl.ahead, 600) - 1;
         },
       );
       setCountdown(LEAD);
       const cd = window.setInterval(() => {
         if (started) return window.clearInterval(cd);
-        const n = Math.max(2, need());
+        const pl = plan(tr.duration() || 300);
         const b = extRef.current.status?.buffered ?? 0;
-        setCountdown(Math.max(1, Math.ceil(n - b)));
+        setCountdown(Math.max(1, Math.ceil(pl.resume + 0.5 - Math.max(0, b))));
       }, 250);
     } else tr?.play();
     setPhase('live');
@@ -829,14 +833,14 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
             {phase === 'live' && backing && hold !== null && (
               <div className="overlay hold">
                 <p>
-                  {bmode === 'ai' && !extRef.current.fellBack ? '✨ AI 伴奏準備中' : '⚡ 伴奏準備中'}，還要約 <strong>{hold}</strong> 秒
+                  {bmode === 'ai' && !extRef.current.fellBack ? '✨ 高品質伴奏準備中' : '伴奏準備中'}，還要約 <strong>{hold}</strong> 秒
                 </p>
                 {bmode === 'ai' && aiSpeed() > 0 && aiSpeed() < 1.15 && (
                   <p className="muted small">你的電腦算 AI 是 {aiSpeed().toFixed(1)} 倍速，比歌慢，所以要先多算一段</p>
                 )}
                 {bmode === 'ai' && (
                   <button className="btn primary" onClick={() => pickMode('fast')}>
-                    ⚡ 改用快速伴奏（馬上繼續）
+                    ⚡ 改用輕量伴奏（馬上繼續）
                   </button>
                 )}
               </div>
@@ -921,10 +925,10 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
             <div className="sing-mode">
               <div className="seg big" role="radiogroup" aria-label="原唱或伴奏">
                 {(['orig', 'fast', 'ai'] as const).map((m) => {
-                  const on = m === 'orig' ? !backing || vocal >= 0.5 : backing && vocal < 0.5 && bmode === m;
+                  const on = backing ? bmode === m : m === 'orig';
                   return (
                     <button key={m} role="radio" aria-checked={on} disabled={m !== 'orig' && !ext.present} className={'seg-btn' + (on ? ' on' : '')} onClick={() => pickMode(m)}>
-                      {m === 'orig' ? '🎤 原唱' : m === 'fast' ? '⚡ 快速伴奏' : '✨ AI 伴奏'}
+                      {m === 'orig' ? '🎤 原唱' : m === 'fast' ? '⚡ 伴奏' : '✨ 高品質伴奏'}
                     </button>
                   );
                 })}
@@ -937,16 +941,16 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
                       一分鐘裝好
                     </a>
                   </>
-                ) : !backing || vocal >= 0.5 ? (
-                  '播原本的 MV 聲音'
+                ) : bmode === 'orig' ? (
+                  '原唱 · 灰條和歌詞由你的電腦即時分析'
                 ) : bmode === 'fast' ? (
-                  '你的電腦即時去人聲：馬上開始，人聲會有點悶'
+                  '輕量 AI 即時去人聲：一般電腦就能跑，幾秒就開始'
                 ) : (
                   (() => {
                     const sp = aiSpeed();
-                    if (!sp) return '你的電腦用 AI 即時去人聲：最乾淨，第一次會先測你的電腦速度';
+                    if (!sp) return '高品質 AI 去人聲：最乾淨，需要好一點的顯示卡（第一次會先測速）';
                     const w = Math.round(aiNeed(sp, hud.dur || 240));
-                    return `你的電腦用 AI 即時去人聲：最乾淨 · ${sp.toFixed(1)} 倍速` + (sp >= 1.15 ? '，幾秒就開始' : `，開始前要先等約 ${w} 秒`);
+                    return `高品質 AI 去人聲：最乾淨 · 你的電腦 ${sp.toFixed(1)} 倍速` + (sp >= 1.15 ? '，幾秒就開始' : `，開始前要先等約 ${w} 秒`);
                   })()
                 )}
               </p>
@@ -958,7 +962,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
               🎛️ {t('ext.countdown', { n: countdown })}
               {bmode === 'ai' && countdown > 5 && (
                 <button className="btn small primary" style={{ marginLeft: 10 }} onClick={() => pickMode('fast')}>
-                  ⚡ 改用快速伴奏（馬上開始）
+                  ⚡ 改用輕量伴奏（馬上開始）
                 </button>
               )}
             </div>
@@ -1042,7 +1046,9 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
                           ? t('ext.loading')
                           : ext.status.mode === 'ai'
                             ? t('ext.ai', { x: (ext.status.speed ?? 0).toFixed(1) })
-                            : t('ext.classic')}
+                            : ext.status.mode === 'lite'
+                              ? `輕量 AI 分析中（${(ext.status.speed ?? 0).toFixed(1)} 倍即時）`
+                              : t('ext.classic')}
                       {ext.status.buffered !== undefined && phase === 'live' ? ' · ' + t('ext.ahead', { s: Math.max(0, ext.status.buffered).toFixed(1) }) : ''}
                     </small>
                   )}
