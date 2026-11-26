@@ -16,6 +16,7 @@ export type PageMsg =
 /** extension -> page */
 export type ExtMsg =
   | { type: 'ready'; version: string; consent: boolean }
+  | { type: 'pitch'; t: number; hop: number; midi: (number | null)[] } // separated vocal's pitch, ahead of the picture
   | { type: 'status'; state: 'loading' | 'running' | 'fallback' | 'error'; mode?: string; speed?: number; buffered?: number; message?: string };
 
 /** tap (YouTube frame) -> offscreen: one block of the lead player's audio */

@@ -1067,7 +1067,8 @@ a.btn {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 6px 4px;
+  padding: 2px 4px;
+  margin-top: -6px;
   min-height: 6.2em;
 }
 .ktv-row {

@@ -68,6 +68,10 @@ export interface YouTubeEvents {
 }
 
 /** The video plays in YouTube's own embedded player; we only read its clock. */
+/** Dev only (?fakeyt): a local video in a cross-origin frame stands in for the YouTube player. */
+const FAKE_YT = typeof location !== 'undefined' && /[?&]fakeyt\b/.test(location.search);
+let fakeId = 0;
+
 export class YouTubeTransport implements Transport {
   private player: any = null;
   private state = -1;
@@ -76,6 +80,10 @@ export class YouTubeTransport implements Transport {
   private lastAt = 0;
 
   constructor(host: HTMLElement, videoId: string, ev: YouTubeEvents = {}) {
+    if (FAKE_YT) {
+      this.fake(host, ev);
+      return;
+    }
     const el = document.createElement('div');
     host.appendChild(el);
     loadYouTubeApi()
@@ -103,6 +111,38 @@ export class YouTubeTransport implements Transport {
         });
       })
       .catch(() => ev.onError?.(-1));
+  }
+
+  private fake(host: HTMLElement, ev: YouTubeEvents) {
+    const id = String(++fakeId);
+    const f = document.createElement('iframe');
+    f.src = `http://127.0.0.1:4174/exttest-embed.html?muted=${ev.muted ? 1 : 0}&id=${id}`;
+    f.allow = 'autoplay';
+    f.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:0';
+    host.appendChild(f);
+    let t = 0;
+    let playing = false;
+    let ended = false;
+    let dur = 0;
+    const send = (m: object) => f.contentWindow?.postMessage(m, '*');
+    window.addEventListener('message', (e) => {
+      if (e.source !== f.contentWindow || !e.data || e.data.id !== id) return;
+      ({ t, playing, ended, dur } = e.data);
+      this.state = ended ? 0 : playing ? 1 : 2;
+    });
+    this.player = {
+      getCurrentTime: () => t,
+      getDuration: () => dur,
+      getPlaybackRate: () => 1,
+      playVideo: () => send({ cmd: 'play' }),
+      pauseVideo: () => send({ cmd: 'pause' }),
+      seekTo: (s: number) => send({ cmd: 'seek', t: s }),
+      mute: () => send({ cmd: 'mute', on: true }),
+      unMute: () => send({ cmd: 'mute', on: false }),
+      destroy: () => f.remove(),
+      getVideoData: () => ({ title: 'Test clip' }),
+    };
+    setTimeout(() => ev.onReady?.(), 300);
   }
 
   /** The player reports its clock in coarse steps; fill in between them so the lane scrolls smoothly. */
@@ -423,6 +463,8 @@ export class DualTransport implements Transport {
     return this.main.ended();
   }
   private waiting: 'main' | 'lead' | null = null;
+  /** The picture has started at least once (before that, only the lead runs: nothing to keep in step). */
+  started = false;
   /**
    * First start: the lead player starts now; the picture starts once the lead is really `ahead`
    * seconds in (YouTube buffers, so a fixed timer would leave the AI without its head start).
@@ -436,6 +478,7 @@ export class DualTransport implements Transport {
       // never hold the picture forever (a lead that cannot get going, an ad...)
       if (ok || performance.now() - t0 > 10 * 60 * 1000) {
         window.clearInterval(this.timer);
+        this.started = true;
         this.main.play();
         onMainStart?.();
       }
@@ -443,6 +486,8 @@ export class DualTransport implements Transport {
   }
   play() {
     this.waiting = null;
+    this.started = true;
+    window.clearInterval(this.timer);
     if (!this.solo) this.lead.play();
     this.main.play();
   }
@@ -475,6 +520,7 @@ export class DualTransport implements Transport {
   solo = false;
   fallbackToOriginal() {
     this.solo = true;
+    this.started = true;
     this.waiting = null;
     window.clearInterval(this.timer);
     this.lead.pause();
@@ -486,7 +532,7 @@ export class DualTransport implements Transport {
    * falls behind (buffering), the picture waits for it; if the picture falls behind, the lead waits.
    */
   keepAhead() {
-    if (this.solo) return;
+    if (this.solo || !this.started) return;
     const gap = this.lead.time() - this.main.time();
     if (this.waiting === 'main') {
       if (gap >= this.ahead - 0.3) {
@@ -511,6 +557,12 @@ export class DualTransport implements Transport {
       this.waiting = 'main';
       this.main.pause();
     }
+  }
+  /** The backing ran out: the picture waits, the lead keeps feeding the extension. */
+  holdForBacking() {
+    this.waiting = null;
+    this.main.pause();
+    if (!this.lead.ended()) this.lead.play();
   }
   /** True while one player waits for the other (shown as "buffering"). */
   syncing() {

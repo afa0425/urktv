@@ -11,6 +11,7 @@ import { MODEL_BASE, ORT_BASE } from '../separate/client';
 import { runWorker } from '../separate/client';
 import { fromInt16, getLocal, isLocal } from '../separate/db';
 import { computeHighlights, isCatalog, loadCatalog, type Layered } from '../core/catalog';
+import { LiveNotes } from '../core/liveNotes';
 import { drawDualLane, meanOffset, type DualState } from './dualLane';
 import { useT, type I18nKey } from '../i18n';
 import { drawLane, nearestNote, type LaneState, type TracePoint } from './lane';
@@ -144,6 +145,17 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   const [diagCopied, setDiagCopied] = useState(false);
   const [countdown, setCountdown] = useState(0);
   const mainSince = useRef(0);
+  const manualLyrics = useRef(false);
+  // gray bars made live by the extension (songs without prepared bars)
+  const liveNotes = useRef(new LiveNotes());
+  useEffect(() => {
+    const on = (e: MessageEvent) => {
+      if (e.source !== window || e.data?.source !== 'urktv-ext' || e.data.type !== 'pitch') return;
+      liveNotes.current.add(e.data.t, e.data.hop, e.data.midi);
+    };
+    window.addEventListener('message', on);
+    return () => window.removeEventListener('message', on);
+  }, []);
   const rebuffering = useRef(false);
   const extRef = useRef(ext);
   extRef.current = ext;
@@ -272,13 +284,20 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
       // the classic vocal cut needs almost no head start; the AI needs its full window
       const st = extRef.current.status;
       if (st?.mode === 'classic') tr.ahead = 2;
-      tr.keepAhead();
+      if (!rebuffering.current) tr.keepAhead();
       if (!tr.solo && mainSince.current) {
         const b = st?.buffered ?? 99;
         if (tr.playing() && b < 0.8) {
-          tr.main.pause(); // like a video buffering: wait for the backing instead of singing without it
+          // like a video buffering: the picture waits for the backing, the small window keeps going
+          tr.holdForBacking();
           rebuffering.current = true;
-        } else if (rebuffering.current && b > 5) {
+          // the AI can't keep up on this computer: the classic vocal cut from here on
+          if (st?.mode !== 'classic' && !extRef.current.fellBack) {
+            extRef.current.fellBack = true;
+            extPost({ type: 'setmode', mode: 'classic' });
+            tr.ahead = 2;
+          }
+        } else if (rebuffering.current && b > Math.min(5, tr.ahead + 1)) {
           rebuffering.current = false;
           tr.main.play();
         }
@@ -299,6 +318,22 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
     }, 200);
     return () => window.clearInterval(id);
   }, [phase, backing, local]);
+
+  // lyrics from the web follow the album, the MV often has an intro: line them up with where the
+  // separated vocal actually sings (until you fix them by hand)
+  useEffect(() => {
+    if (phase !== 'live' || saved?.kind !== 'lrc' || !chart?.lines.length) return;
+    const id = window.setInterval(() => {
+      if (manualLyrics.current) return;
+      const lines = chart.lines.map((l) => ({ start: l.start, end: Math.min(l.end, l.start + 6) }));
+      const r = liveNotes.current.alignOffset(lines);
+      if (!r || r.voiced < 8) return;
+      const cur = (saved.offsetMs ?? 0) / 1000;
+      if (Math.abs(r.off - cur) >= 0.3) patchChart({ offsetMs: Math.round(r.off * 1000) });
+    }, 4000);
+    return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, saved?.kind, saved?.offsetMs, chart]);
 
   /** Everything needed to see where the backing track gets stuck, as text to copy. */
   const diagText = () => {
@@ -440,7 +475,12 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
       const time = tr.time();
       const playing = tr.playing();
       const tc = time - L.offset - L.latency; // chart time the voice we hear now belongs to
-      const notes = L.chart?.hasPitch ? L.chart.notes : null;
+      let notes = L.chart?.hasPitch ? L.chart.notes : null;
+      // no prepared bars: the ones the extension makes from the separated vocal (media time -> chart time)
+      if (!notes && liveNotes.current.has()) {
+        notes = liveNotes.current.between(time - 4, time + 8).map((n) => ({ ...n, start: n.start - L.offset, end: n.end - L.offset }));
+      }
+      const liveBars = !(L.chart?.hasPitch) && !!notes;
 
       if (playing) {
         const tp = trace.current;
@@ -451,12 +491,17 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
           const target = nearestNote(notes, tc);
           if (target) shown = foldNear(shown, target.midi + L.transpose);
         }
-        tp.push({ t: tc, midi: shown, hit: r.hit });
+        let hit = r.hit;
+        if (liveBars && shown !== null && notes) {
+          const target = nearestNote(notes, tc);
+          hit = !!target && tc >= target.start - 0.15 && tc <= target.end + 0.15 && Math.abs(shown - (target.midi + L.transpose)) < 1;
+        }
+        tp.push({ t: tc, midi: shown, hit });
         while (tp.length && tp[0].t < tc - 10) tp.shift();
 
         // judge notes as they finish
         const g = scorer.current;
-        if (g instanceof GuideScorer && notes) {
+        if (g instanceof GuideScorer && notes && !liveBars) {
           const c = coach.current;
           while (c.idx < notes.length && notes[c.idx].end < tc) {
             const i = c.idx++;
@@ -578,14 +623,16 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
       let started = false;
       // how much backing to prepare before the picture starts: enough that the AI, at this
       // computer's speed, is never caught up before the end of the song
+      const t0 = performance.now();
+      // how much backing to prepare before the picture starts. The AI only if this computer runs it
+      // faster than the song; otherwise the classic vocal cut (2 s head start). Never wait long.
       const need = () => {
         const st = extRef.current.status;
         const sp = st?.speed ?? 0;
-        if (extRef.current.fellBack) return 2; // the AI is out of the picture: classic needs almost no head start
-        if (!sp) return Infinity; // speed not measured yet (first window still running)
+        if (extRef.current.fellBack || st?.mode === 'classic') return 2;
         if (sp >= 1.15) return 8;
-        const dur = tr.duration() || 300;
-        return Math.min(600, dur * (1 / sp - 1) + 8);
+        if (sp > 0 || performance.now() - t0 > 12000) return -1; // too slow / no answer: go classic
+        return LEAD;
       };
       tr.startStaggered(
         () => {
@@ -594,23 +641,22 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
         },
         () => {
           const st = extRef.current.status;
-          const n = need();
-          // far too slow even with a head start: the classic vocal cut, almost no wait
-          if (n !== Infinity && n > 150 && st?.mode !== 'classic') {
+          let n = need();
+          if (n === -1) {
             extPost({ type: 'setmode', mode: 'classic' });
-            tr.ahead = 2;
-            return false;
+            extRef.current.fellBack = true;
+            n = 2;
           }
-          tr.ahead = n === Infinity ? LEAD : Math.max(2, n);
-          return (st?.buffered ?? 0) >= Math.min(n, 600) - 0.5 && n !== Infinity;
+          tr.ahead = n;
+          return (st?.buffered ?? 0) >= n - 0.5 && tr.lead.time() >= n - 0.5;
         },
       );
       setCountdown(LEAD);
       const cd = window.setInterval(() => {
         if (started) return window.clearInterval(cd);
-        const n = need();
+        const n = Math.max(2, need());
         const b = extRef.current.status?.buffered ?? 0;
-        setCountdown(n === Infinity ? LEAD : Math.max(1, Math.ceil(n - b)));
+        setCountdown(Math.max(1, Math.ceil(n - b)));
       }, 250);
     } else tr?.play();
     setPhase('live');
@@ -659,6 +705,18 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   };
   const patchChart = (p: { offsetMs?: number; transpose?: number }) =>
     charts.set((c) => (c[song.id] ? { ...c, [song.id]: { ...c[song.id], ...p } } : c));
+  /** KTV way to fix the timing: press when a line starts singing; that line snaps to now. */
+  const alignLyrics = () => {
+    const tr = transport.current;
+    if (!tr || !chart?.lines.length) return;
+    manualLyrics.current = true;
+    const now = tr.time();
+    const tc = now - live.current.offset;
+    let best = chart.lines[0];
+    for (const l of chart.lines) if (Math.abs(l.start - tc) < Math.abs(best.start - tc)) best = l;
+    // the line about to start or just started, not one far away
+    patchChart({ offsetMs: Math.round((now - best.start) * 1000) });
+  };
   const removeChart = () =>
     charts.set((c) => {
       const { [song.id]: _gone, ...rest } = c;
@@ -708,50 +766,6 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
               </div>
             )}
           </div>
-
-          {phase === 'live' && !isDemo && (
-            <div className="seekbar">
-              <button className="btn small" onClick={() => seekTo(hud.time - 10)} aria-label="-10">
-                ⏪ 10
-              </button>
-              <span className="seek-time">{fmt(drag ?? hud.time)}</span>
-              <input
-                className="seek"
-                type="range"
-                min={0}
-                max={Math.max(1, Math.floor(hud.dur))}
-                step={1}
-                value={drag ?? Math.floor(hud.time)}
-                aria-label={t('stage.seek')}
-                onChange={(e) => setDrag(Number(e.target.value))}
-                onPointerUp={() => drag !== null && (seekTo(drag), setDrag(null))}
-                onKeyUp={() => drag !== null && (seekTo(drag), setDrag(null))}
-                onBlur={() => setDrag(null)}
-              />
-              <span className="seek-time">{fmt(hud.dur)}</span>
-              <button className="btn small" onClick={() => seekTo(hud.time + 10)} aria-label="+10">
-                10 ⏩
-              </button>
-              {firstVoice() !== null && hud.time < (firstVoice() ?? 0) && (
-                <button className="btn small" onClick={() => seekTo(firstVoice()!)}>
-                  {t('stage.skipIntro')}
-                </button>
-              )}
-            </div>
-          )}
-          {lyricsNote && <p className="muted small lyric-src">{lyricsNote}</p>}
-          {countdown > 0 && <div className="notice ok countdown">🎛️ {t('ext.countdown', { n: countdown })}</div>}
-          {saved?.kind === 'lrc' && phase === 'live' && (
-            <div className="row center lyric-nudge">
-              <button className="btn small" onClick={() => patchChart({ offsetMs: (saved.offsetMs ?? 0) - 500 })}>
-                {t('stage.lyricsEarlier')}
-              </button>
-              <span className="muted small">{((saved.offsetMs ?? 0) / 1000).toFixed(1)} s</span>
-              <button className="btn small" onClick={() => patchChart({ offsetMs: (saved.offsetMs ?? 0) + 500 })}>
-                {t('stage.lyricsLater')}
-              </button>
-            </div>
-          )}
           <div className="ktv" ref={ktvRef} aria-live="off">
             {chart && chart.lines.length > 0 ? (
               [0, 1].map((row) => {
@@ -780,6 +794,57 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
             )}
           </div>
 
+          {phase === 'live' && !isDemo && (
+            <div className="seekbar">
+              <button className="btn small" onClick={() => seekTo(hud.time - 10)} aria-label="-10">
+                ⏪ 10
+              </button>
+              <span className="seek-time">{fmt(drag ?? hud.time)}</span>
+              <input
+                className="seek"
+                type="range"
+                min={0}
+                max={Math.max(1, Math.floor(hud.dur))}
+                step={1}
+                value={drag ?? Math.floor(hud.time)}
+                aria-label={t('stage.seek')}
+                onChange={(e) => setDrag(Number(e.target.value))}
+                onPointerUp={() => drag !== null && (seekTo(drag), setDrag(null))}
+                onKeyUp={() => drag !== null && (seekTo(drag), setDrag(null))}
+                onBlur={() => setDrag(null)}
+              />
+              <span className="seek-time">{fmt(hud.dur)}</span>
+              <button className="btn small" onClick={() => seekTo(hud.time + 10)} aria-label="+10">
+                10 ⏩
+              </button>
+              {(backing || !!local) && (
+                <button className={'btn small' + (vocal >= 0.5 ? ' primary' : '')} onClick={() => changeVocal(vocal >= 0.5 ? 0 : 1)} aria-label="vocal">
+                  {vocal >= 0.5 ? '🎤 原唱' : '🎶 伴唱'}
+                </button>
+              )}
+              {firstVoice() !== null && hud.time < (firstVoice() ?? 0) && (
+                <button className="btn small" onClick={() => seekTo(firstVoice()!)}>
+                  {t('stage.skipIntro')}
+                </button>
+              )}
+            </div>
+          )}
+          {lyricsNote && <p className="muted small lyric-src">{lyricsNote}</p>}
+          {countdown > 0 && <div className="notice ok countdown">🎛️ {t('ext.countdown', { n: countdown })}</div>}
+          {saved?.kind === 'lrc' && phase === 'live' && (
+            <div className="row center lyric-nudge">
+              <button className="btn small" onClick={() => ((manualLyrics.current = true), patchChart({ offsetMs: (saved.offsetMs ?? 0) - 500 }))}>
+                {t('stage.lyricsEarlier')}
+              </button>
+              <button className="btn small primary" onClick={alignLyrics}>
+                {t('stage.lyricsTap')}
+              </button>
+              <span className="muted small">{((saved.offsetMs ?? 0) / 1000).toFixed(1)} s</span>
+              <button className="btn small" onClick={() => ((manualLyrics.current = true), patchChart({ offsetMs: (saved.offsetMs ?? 0) + 500 }))}>
+                {t('stage.lyricsLater')}
+              </button>
+            </div>
+          )}
           <div className={'lane-wrap' + (guide ? ' dual' : '')}>
             <canvas ref={canvasRef} className="lane" />
             <div className="pops" aria-live="polite">

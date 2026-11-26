@@ -152,6 +152,7 @@ export function drawDualLane(ctx: CanvasRenderingContext2D, w: number, h: number
     const x0 = x(n.start);
     const x1 = x(n.end);
     const yy = yIn(n.midi + i.transpose, 0, topH) - barTop / 2;
+    if (yy < 0 || yy + barTop > topH) continue; // outside its row
     const gold = n.kind === 'golden';
     rr(ctx, x0, yy, Math.max(3, x1 - x0 - 1), barTop, 5);
     ctx.fillStyle = n.end < i.now ? C.past : gold ? C.gold : C.note;
@@ -211,7 +212,7 @@ export function drawDualLane(ctx: CanvasRenderingContext2D, w: number, h: number
     const x0 = x(b.start);
     const x1 = x(b.end);
     const yy = yIn(b.midi, botY, botH) - barBot / 2;
-    if (yy < botY - barBot || yy > botY + botH) continue;
+    if (yy < botY || yy + barBot > h) continue;
     rr(ctx, x0, yy, Math.max(3, x1 - x0), barBot, 5);
     ctx.fillStyle = b.state === 'star' ? C.star : b.state === 'hit' ? C.hit : C.off;
     ctx.globalAlpha = 0.85;
@@ -225,6 +226,7 @@ export function drawDualLane(ctx: CanvasRenderingContext2D, w: number, h: number
     if (n.end < i.now - past) continue;
     if (n.start > i.now + future) break;
     const yy = yIn(n.midi + i.transpose, botY, botH) - barBot / 2;
+    if (yy < botY || yy + barBot > h) continue;
     rr(ctx, x(n.start), yy, Math.max(3, x(n.end) - x(n.start) - 1), barBot, 5);
     ctx.stroke();
   }

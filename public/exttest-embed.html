@@ -5,7 +5,13 @@
   const v = document.getElementById('v');
   v.muted = new URLSearchParams(location.search).get('muted') === '1';
   const name = v.muted ? 'main' : 'lead';
-  window.addEventListener('message', (e) => { if (e.data && e.data.cmd === 'play') v.play().catch((err) => parent.postMessage({ frame: name, err: String(err) }, '*')); });
-  setInterval(() => parent.postMessage({ frame: name, t: v.currentTime, playing: !v.paused }, '*'), 200);
+  window.addEventListener('message', (e) => {
+    const c = e.data && e.data.cmd;
+    if (c === 'play') v.play().catch((err) => parent.postMessage({ frame: name, err: String(err) }, '*'));
+    else if (c === 'pause') v.pause();
+    else if (c === 'seek') v.currentTime = e.data.t;
+    else if (c === 'mute') v.muted = !!e.data.on;
+  });
+  setInterval(() => parent.postMessage({ frame: name, id: new URLSearchParams(location.search).get('id'), t: v.currentTime, playing: !v.paused, ended: v.ended, dur: v.duration || 0 }, '*'), 100);
 </script>
 </body></html>
