@@ -28,6 +28,10 @@ ctx.audioWorklet
   .catch(() => {
     /* no key change, the rest works */
   });
+/** Backing gets the loudness restore only as the voice goes away (with the voice in, it is the song). */
+function applyGains() {
+  instGain.gain.setTargetAtTime(1 + (S.makeup - 1) * (1 - S.vocal), ctx.currentTime, 0.3);
+}
 function setKey(semitones: number) {
   wantKey = semitones;
   shifter?.parameters.get('ratio')!.setValueAtTime(Math.pow(2, semitones / 12), ctx.currentTime);
@@ -43,6 +47,8 @@ const S = {
   lite: null as Worker | null, // the light AI (Spleeter 2 stems), in its own worker
   liteLoading: false,
   lf: 0, // light AI: next STFT frame to output
+  makeup: 1, // backing loudness restore (1 = none)
+  vocal: 0,
   cfg: null as (MdxConfig & { file: string }) | null,
   session: null as Worker | null, // the AI model, in its own worker
   sp: null as _Spectral | null,
@@ -381,12 +387,11 @@ async function liteStep(): Promise<boolean | 'stale'> {
       for (let k = 0; k <= LN / 2; k++) {
         let m = 1;
         if (k < LB) {
-          // sharper than Spleeter's default (power 2): where the voice dominates, more of it goes
-          const vv = v[o + k];
-          const av = ac[o + k];
-          const va = vv * vv * vv;
-          const aa = av * av * av;
-          m = (aa + 5e-13) / (va + aa + 1e-12);
+          // Spleeter's own ratio (power 2), never below a floor: soft instruments the model mistakes
+          // for voice (piano, strings in ballads) are kept instead of disappearing
+          const va = v[o + k] * v[o + k];
+          const aa = ac[o + k] * ac[o + k];
+          m = Math.max(0.12, (aa + 5e-11) / (va + aa + 1e-10));
         }
         ir[k] = fr.re[k] * m;
         ii[k] = fr.im[k] * m;
@@ -412,6 +417,16 @@ async function liteStep(): Promise<boolean | 'stale'> {
     }
   }
   S.speed = len / RATE / ((performance.now() - t1) / 1000);
+  // how much quieter the backing is than the song here (smoothed): used to bring it back up
+  let mi = 0;
+  let bi = 0;
+  for (let j = 0; j < len; j += 4) {
+    const a = S.L[r0 + j] ?? 0;
+    mi += a * a;
+    bi += inst[0][j] * inst[0][j];
+  }
+  if (bi > 1e-9 && mi > 1e-9) S.makeup = S.makeup * 0.7 + 0.3 * Math.min(2.2, Math.max(1, 0.9 * Math.sqrt(mi / bi)));
+  applyGains();
   const t = S.t0 + r0 / RATE;
   S.segs.push({ t, inst, voc });
   pitchFeed(t, voc);
@@ -653,7 +668,10 @@ function startLite(base: string) {
 let lostAt = 0;
 chrome.runtime.onMessage.addListener((m: any, _s: unknown, reply: (x: unknown) => void) => {
   if (m?.to === 'engine-diag') {
-    reply({ shifter: !!shifter, key: wantKey, blocks: S.blocks, lastTap: S.lastTap, busy: S.busy, using: S.using, running: S.running, len: S.len, done: S.done, segs: S.segs.length, clock: S.clock, up: performance.now() / 1000 });
+    const rms = (a?: Float32Array) => (a && a.length ? Math.sqrt(a.reduce((x, v) => x + v * v, 0) / a.length) : 0);
+    const last = S.segs[S.segs.length - 1];
+    const m0 = Math.max(0, S.len - 44100);
+    reply({ instRms: rms(last?.inst[0]), vocRms: rms(last?.voc[0]), inRms: rms(S.L.subarray(m0, S.len)), instGain: instGain.gain.value, vocGain: vocGain.gain.value, shifter: !!shifter, key: wantKey, blocks: S.blocks, lastTap: S.lastTap, busy: S.busy, using: S.using, running: S.running, len: S.len, done: S.done, segs: S.segs.length, clock: S.clock, up: performance.now() / 1000 });
     return;
   }
   if (m?.to !== 'engine') return;
@@ -673,6 +691,8 @@ chrome.runtime.onMessage.addListener((m: any, _s: unknown, reply: (x: unknown) =
     S.lastError = '';
     S.mode = msg.mode;
     vocGain.gain.value = msg.vocal;
+    S.vocal = msg.vocal;
+    S.makeup = 1;
     void ctx.resume();
     reset(0);
     if (msg.mode === 'classic') S.using = 'classic';
@@ -749,6 +769,8 @@ chrome.runtime.onMessage.addListener((m: any, _s: unknown, reply: (x: unknown) =
     setKey((msg as any).semitones);
   } else if (msg.type === 'vocal') {
     vocGain.gain.setTargetAtTime(msg.level, ctx.currentTime, 0.03);
+    S.vocal = msg.level;
+    applyGains();
   } else if (msg.type === 'stop') {
     S.running = false;
     unschedule();

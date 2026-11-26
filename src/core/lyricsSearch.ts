@@ -59,6 +59,11 @@ export function parseTitle(title: string): { artists: string[]; songs: string[] 
   if (cjk(artistPart)) artists.push(cjk(artistPart));
   const latinA = artistPart.replace(/[㐀-鿿豈-﫿]+/g, ' ').replace(/\s+/g, ' ').trim();
   if (latinA.length > 1) artists.push(latinA);
+  // 《…》 is often a drama or album, but when nothing else names the song it is the song
+  if (!songs.length) {
+    const book = /《(.+?)》/.exec(main)?.[1]?.replace(NOISE, ' ').trim();
+    if (book && cjk(book)) songs.push(cjk(book));
+  }
   // no brackets and no dash: the whole cleaned title is all we have
   if (!songs.length) {
     const whole = main.replace(/《.*?》/g, ' ').replace(NOISE, ' ').replace(/\s+/g, ' ').trim();
@@ -72,6 +77,30 @@ interface Cand {
   trackName: string;
   duration: number;
   syncedLyrics: string | null;
+  /** NetEase song id: its lyrics are fetched only if it wins */
+  ne?: number;
+}
+
+/** Credits that some lyric files carry as timed lines (作词 : …): not to be sung. */
+const CREDIT = /^\[[\d:.]+\]\s*(絃樂編寫|弦乐编写|配唱製作|配唱制作|作词|作詞|作曲|编曲|編曲|制作人|製作人|监制|監製|混音|母带|母帶|和声|和聲|录音|錄音|吉他|贝斯|貝斯|鼓|弦乐|弦樂|出品|发行|發行|OP|SP|Lyricist|Composer|Arranger|Producer)\s*[:：]/i;
+
+/** Simplified → Traditional (Taiwan, with phrases); loaded only when a lyric needs it. */
+let toTw: ((s: string) => string) | null = null;
+async function traditional(text: string): Promise<string> {
+  if (!toTw) {
+    const { Converter } = await import('opencc-js/cn2t');
+    toTw = Converter({ from: 'cn', to: 'twp' });
+  }
+  return toTw!(text);
+}
+
+async function tidy(lrc: string): Promise<string> {
+  // drop credit lines and translations appended to a line ("…^English", "… / English")
+  const lines = lrc
+    .split('\n')
+    .filter((l) => !CREDIT.test(l.trim()))
+    .map((l) => l.replace(/\^.*$/, '').replace(/\s+\/\s+[A-Za-z].*$/, ''));
+  return traditional(lines.join('\n'));
 }
 
 /** How well an LRCLIB answer fits: the song name must match; artist and length add confidence. */
@@ -85,6 +114,8 @@ export function scoreCand(c: Cand, artists: string[], songs: string[], videoDur:
   for (const a of artists) artist = Math.max(artist, overlap(a, c.artistName));
   let sc = song * 3 + artist * 2;
   if (/various artists/i.test(c.artistName)) sc -= 0.5;
+  // uploads named like videos ("【動態歌詞MV】", 『lyric quote』) are less reliable than the real track
+  if (/[【『]|動態|动态|\bmv\b|歌詞版|歌词版|lyrics?/i.test(c.trackName)) sc -= 1;
   // an MV is usually as long as the song or longer (intro, story); much shorter means another version
   if (videoDur > 0 && c.duration > 0) {
     const d = videoDur - c.duration;
@@ -101,26 +132,56 @@ export async function findLyrics(videoTitle: string, videoDur = 0): Promise<LrcH
     for (const a of artists) queries.push(`${a} ${s}`);
     queries.push(s);
   }
+  const uniq = [...new Set(queries)];
   const seen = new Map<string, Cand>();
-  for (const q of [...new Set(queries)].slice(0, 6)) {
+  // source 1: LRCLIB (free, public, many languages)
+  for (const q of uniq.slice(0, 6)) {
     try {
       const r = await fetch('https://lrclib.net/api/search?q=' + encodeURIComponent(q));
       if (!r.ok) continue;
-      for (const c of (await r.json()) as Cand[]) if (c.syncedLyrics) seen.set(`${c.artistName}|${c.trackName}|${c.duration}`, c);
+      for (const c of (await r.json()) as Cand[]) if (c.syncedLyrics) seen.set(`L|${c.artistName}|${c.trackName}|${c.duration}`, c);
     } catch {
       /* offline or blocked */
     }
     if (seen.size >= 8) break;
   }
-  let best: Cand | null = null;
-  let bestSc = 0;
-  for (const c of seen.values()) {
-    const sc = scoreCand(c, artists, songs, videoDur);
-    if (sc > bestSc) {
-      bestSc = sc;
-      best = c;
+  // compare in Traditional Chinese: 貓/猫, 膽/胆 must count as the same character
+  await traditional('');
+  const tw = (c: Cand): Cand => ({ ...c, trackName: toTw!(c.trackName), artistName: toTw!(c.artistName) });
+  const ranked = () =>
+    [...seen.values()]
+      .map((c) => ({ c, sc: scoreCand(tw(c), artists.map(toTw!), songs.map(toTw!), videoDur) }))
+      .filter((x) => x.sc >= 2.2)
+      .sort((a, b) => b.sc - a.sc);
+  let list = ranked();
+  // source 2: NetEase Cloud Music through our server (most Mandarin, Taiwanese and Cantonese songs)
+  if (!list.length || list[0].sc < 3.5) {
+    for (const q of uniq.slice(0, 3)) {
+      try {
+        const r = await fetch('/api/lyrics/search?q=' + encodeURIComponent(q));
+        if (!r.ok) continue;
+        const d = (await r.json()) as { songs: { id: number; trackName: string; artistName: string; duration: number }[] };
+        for (const x of d.songs) seen.set(`N|${x.id}`, { ...x, syncedLyrics: null, ne: x.id });
+      } catch {
+        /* the site's own server is not here (local preview) */
+      }
     }
+    list = ranked();
   }
-  if (!best || bestSc < 2.2) return null; // nothing that is clearly this song: better no lyrics than wrong ones
-  return { lrc: best.syncedLyrics!, name: `${best.artistName} – ${best.trackName}`, duration: best.duration };
+  // the best match that really has timed lyrics (some entries have none, or only a few lines)
+  for (const { c } of list.slice(0, 4)) {
+    let lrc = c.syncedLyrics;
+    if (c.ne) {
+      try {
+        const r = await fetch('/api/lyrics/163/' + c.ne);
+        lrc = r.ok ? ((await r.json()) as { lrc: string }).lrc : '';
+      } catch {
+        lrc = '';
+      }
+    }
+    if (!lrc || (lrc.match(/\[\d+:\d+/g) ?? []).length < 8) continue;
+    const t = tw(c);
+    return { lrc: await tidy(lrc), name: `${t.artistName} – ${t.trackName}`, duration: c.duration };
+  }
+  return null; // nothing that is clearly this song: better no lyrics than wrong ones
 }

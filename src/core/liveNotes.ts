@@ -16,6 +16,28 @@ export class LiveNotes {
     if (this.frames.size > 200000) this.frames.clear(); // a very long session: start over
   }
 
+  /** Everything heard so far, compact (for keeping on this computer). */
+  dump(): { hop: number; k0: number; data: Uint16Array } | null {
+    if (!this.frames.size) return null;
+    let k0 = Infinity;
+    let k1 = -Infinity;
+    for (const k of this.frames.keys()) {
+      if (k < k0) k0 = k;
+      if (k > k1) k1 = k;
+    }
+    const data = new Uint16Array(k1 - k0 + 1);
+    for (const [k, m] of this.frames) if (m !== null) data[k - k0] = Math.round(m * 10);
+    return { hop: this.hop, k0, data };
+  }
+  /** What an earlier time on this computer heard. */
+  restore(c: { hop: number; k0: number; data: Uint16Array }) {
+    this.hop = c.hop;
+    c.data.forEach((v, i) => {
+      if (!this.frames.has(c.k0 + i)) this.frames.set(c.k0 + i, v ? v / 10 : null);
+    });
+    this.edge = Math.max(this.edge, (c.k0 + c.data.length) * c.hop);
+  }
+
   has() {
     return this.frames.size > 0;
   }
@@ -25,24 +47,38 @@ export class LiveNotes {
     const h = this.hop;
     const k0 = Math.floor(a / h);
     const k1 = Math.ceil(b / h);
-    // smooth: median of 5 frames, kills single-frame jumps (octave slips, consonants)
+    // octave slips: a frame an octave away from its neighbourhood is folded back
     const raw: (number | null)[] = [];
-    for (let k = k0 - 2; k <= k1 + 2; k++) raw.push(this.frames.get(k) ?? null);
+    for (let k = k0 - 6; k <= k1 + 6; k++) raw.push(this.frames.get(k) ?? null);
+    const fixed = raw.map((m, i) => {
+      if (m === null) return null;
+      const w = raw.slice(Math.max(0, i - 6), i + 7).filter((x): x is number => x !== null).sort((x, y) => x - y);
+      const med = w[w.length >> 1];
+      let v = m;
+      while (v - med > 8) v -= 12;
+      while (med - v > 8) v += 12;
+      return v;
+    });
+    // smooth: median of 5 frames, kills single-frame jumps (consonants, breaths)
     const sm: (number | null)[] = [];
-    for (let i = 2; i < raw.length - 2; i++) {
-      const w = raw.slice(i - 2, i + 3).filter((x): x is number => x !== null);
+    for (let i = 6; i < fixed.length - 6; i++) {
+      const w = fixed.slice(i - 2, i + 3).filter((x): x is number => x !== null);
       sm.push(w.length >= 3 ? w.sort((x, y) => x - y)[w.length >> 1] : null);
     }
     const out: Note[] = [];
     let cur: { s: number; e: number; ms: number[] } | null = null;
     const close = () => {
-      if (cur && cur.e - cur.s >= 4) {
+      if (cur && cur.e - cur.s >= 3) {
         const ms = [...cur.ms].sort((x, y) => x - y);
         const midi = Math.round(ms[ms.length >> 1]);
         const prev = out[out.length - 1];
         const start = (k0 + cur.s) * h;
-        if (prev && prev.midi === midi && start - prev.end < 0.08) prev.end = (k0 + cur.e + 1) * h;
-        else out.push({ start, end: (k0 + cur.e + 1) * h, midi, text: '', kind: 'normal', line: 0 });
+        const end = (k0 + cur.e + 1) * h;
+        // a short gap on (nearly) the same note is one sung note
+        if (prev && Math.abs(prev.midi - midi) <= 1 && start - prev.end < 0.12) {
+          if (end - start > prev.end - prev.start) prev.midi = midi;
+          prev.end = end;
+        } else out.push({ start, end, midi, text: '', kind: 'normal', line: 0 });
       }
       cur = null;
     };
@@ -50,14 +86,15 @@ export class LiveNotes {
       if (m === null) return close();
       if (cur) {
         const ms = [...cur.ms].sort((x, y) => x - y);
-        if (Math.abs(m - ms[ms.length >> 1]) > 0.7) close();
+        if (Math.abs(m - ms[ms.length >> 1]) > 0.75) close();
       }
       if (!cur) cur = { s: i, e: i, ms: [] };
       cur.e = i;
       cur.ms.push(m);
     });
     close();
-    return out;
+    // too short to sing to: leave it out
+    return out.filter((n) => n.end - n.start >= 0.14);
   }
 
   /**
@@ -88,11 +125,41 @@ export class LiveNotes {
       const j = Math.max(0, Math.min(n, b - kMin));
       return j > i ? pre[j] - pre[i] : 0;
     };
+    // where singing starts after a pause: lyric lines start there
+    const onsets: number[] = [];
+    let quiet = 0;
+    for (let i = 0; i < n; i++) {
+      const v = this.frames.get(kMin + i);
+      if (v === null || v === undefined) quiet++;
+      else {
+        if (quiet * h >= 0.35) onsets.push((kMin + i) * h);
+        quiet = 0;
+      }
+    }
+    const near = (t: number) => {
+      let lo2 = 0;
+      let hi2 = onsets.length - 1;
+      while (lo2 < hi2) {
+        const mid = (lo2 + hi2) >> 1;
+        if (onsets[mid] < t) lo2 = mid + 1;
+        else hi2 = mid;
+      }
+      let d = Infinity;
+      for (const j of [lo2 - 1, lo2]) if (j >= 0 && j < onsets.length) d = Math.min(d, Math.abs(onsets[j] - t));
+      return d;
+    };
+    const heardFrom = kMin * h;
+    const heardTo = (kMax + 1) * h;
     let best = -Infinity;
     let off = 0;
     for (let o = -range; o <= range; o += 0.1) {
       let sc = 0;
-      for (const l of lines) sc += sum(Math.round((l.start + o) / h), Math.round((l.end + o) / h));
+      for (const l of lines) {
+        sc += sum(Math.round((l.start + o) / h), Math.round((l.end + o) / h));
+        // a line start on a singing onset is strong evidence (only where we have heard the song)
+        const ts = l.start + o;
+        if (ts > heardFrom && ts < heardTo && near(ts) < 0.3) sc += 25;
+      }
       if (sc > best + 1e-9) {
         best = sc;
         off = o;

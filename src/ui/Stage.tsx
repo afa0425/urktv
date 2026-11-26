@@ -16,6 +16,7 @@ import { ExtUpdate } from './ExtUpdate';
 import { Prep } from './Prep';
 import { cheer } from './cheers';
 import { findLyrics } from '../core/lyricsSearch';
+import { loadPitch, savePitch } from '../core/songCache';
 import { drawDualLane, meanOffset, type DualState } from './dualLane';
 import { useT, type I18nKey } from '../i18n';
 import { drawLane, nearestNote, type LaneState, type TracePoint } from './lane';
@@ -28,7 +29,9 @@ interface Props {
 }
 
 /** Version of the lyrics search; lyrics saved by an older one are looked up again. */
-const LYRICS_V = 2;
+const LYRICS_V = 3;
+// ?debug: the lyrics search can be tried from the console
+if (typeof location !== 'undefined' && /[?&]debug\b/.test(location.search)) (window as any).urktvFindLyrics = findLyrics;
 
 
 /** About how long a lyric line takes to sing (web lyrics only give when it starts). */
@@ -160,6 +163,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   const [prep, setPrep] = useState<{ pct: number | null; label: string } | null>(null);
   const mainSince = useRef(0);
   const manualLyrics = useRef(false);
+  const alignHist = useRef<number[]>([]);
   const lastRestart = useRef(0);
   const [hold, setHold] = useState<number | null>(null); // mid-song wait: progress 0-100
   // gray bars made live by the extension (songs without prepared bars)
@@ -172,6 +176,22 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
     window.addEventListener('message', on);
     return () => window.removeEventListener('message', on);
   }, []);
+  // sung here before: the vocal's pitch is already known (gray bars for the whole song at once,
+  // lyrics timed from the start); keep what is learned now for next time
+  useEffect(() => {
+    if (!ytPlain) return;
+    void loadPitch(song.id).then((c) => c && liveNotes.current.restore(c));
+    if (/[?&]debug\b/.test(location.search)) (window as any).urktvLive = liveNotes.current;
+    const save = () => {
+      const d = liveNotes.current.dump();
+      if (d && d.data.length > 200) void savePitch(song.id, d);
+    };
+    const id = window.setInterval(save, 15000);
+    return () => {
+      window.clearInterval(id);
+      save();
+    };
+  }, [ytPlain, song.id]);
   const rebuffering = useRef(false);
   const extRef = useRef(ext);
   extRef.current = ext;
@@ -355,6 +375,11 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
       const lines = chart.lines.filter((l) => l.text.trim()).map((l) => ({ start: l.start, end: Math.min(l.end, l.start + sungDur(l.text)) }));
       const r = liveNotes.current.alignOffset(lines, 60);
       if (!r || r.voiced < 12) return;
+      // settled: three answers in a row agree with plenty heard -> stop moving the lyrics
+      const hist = alignHist.current;
+      hist.push(r.off);
+      if (hist.length > 3) hist.shift();
+      if (hist.length === 3 && r.voiced > 30 && Math.max(...hist) - Math.min(...hist) < 0.35) manualLyrics.current = true;
       const cur = (saved.offsetMs ?? 0) / 1000;
       if (Math.abs(r.off - cur) >= 0.3) patchChart({ offsetMs: Math.round(r.off * 1000) });
     }, 4000);
@@ -640,6 +665,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
           transpose: L.transpose,
           curve: L.layered?.curve,
           highlights: L.layered?.highlights ?? (liveBars && notes ? liveHighs(notes) : undefined),
+          syl: sylNear(tc),
         });
       } else {
         drawLane(ctx, cv.clientWidth, cv.clientHeight, lane.current, {
@@ -838,6 +864,17 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
     return -1;
   };
 
+  /** Lyric characters around now, with their sung times, to write on the bars. */
+  const sylNear = (tc: number) => {
+    const ch = live.current.chart;
+    if (!ch?.lines.length) return undefined;
+    const out: { start: number; end: number; text: string }[] = [];
+    ch.lines.forEach((l, j) => {
+      if (l.end < tc - 3 || l.start > tc + 7) return;
+      for (const p of l.parts.length ? l.parts : lrcParts(j)) out.push(p);
+    });
+    return out;
+  };
   /** High notes among the live bars: near the top of what the song has reached so far, and held. */
   const liveHighs = (notes: Note[]) => {
     const J = liveJudge.current;

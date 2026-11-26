@@ -166,10 +166,64 @@ async function roomSocket(req, env, code) {
   return env.ROOMS.get(env.ROOMS.idFromName(code)).fetch(req);
 }
 
+
+// ---------- lyrics from NetEase Cloud Music (a second source after LRCLIB): search and timed LRC ----------
+// The browser cannot call it (no CORS); the Worker asks and caches the answer for a day.
+const NE_H = { Referer: 'https://music.163.com/', 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' };
+async function cached(req, make) {
+  const cache = caches.default;
+  const hit = await cache.match(req);
+  if (hit) return hit;
+  const res = await make();
+  if (res.ok) {
+    const r = new Response(res.body, res);
+    r.headers.set('cache-control', 'public, max-age=86400');
+    await cache.put(req, r.clone());
+    return r;
+  }
+  return res;
+}
+async function lyricsApi(req, url, path) {
+  if (path === 'lyrics/search') {
+    const q = (url.searchParams.get('q') || '').slice(0, 100);
+    if (!q.trim()) return json({ songs: [] });
+    return cached(new Request(url.toString()), async () => {
+      const r = await fetch('https://music.163.com/api/cloudsearch/pc', {
+        method: 'POST',
+        headers: { ...NE_H, 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ s: q, type: '1', limit: '6' }),
+      });
+      if (!r.ok) return json({ songs: [] }, 502);
+      const d = await r.json();
+      const songs = (d?.result?.songs || []).map((s) => ({
+        id: s.id,
+        trackName: s.name,
+        artistName: (s.ar || []).map((a) => a.name).join(', '),
+        duration: Math.round((s.dt || 0) / 1000),
+      }));
+      return json({ songs });
+    });
+  }
+  const m = /^lyrics\/163\/(\d{1,15})$/.exec(path);
+  if (m) {
+    return cached(new Request(url.toString()), async () => {
+      const r = await fetch(`https://music.163.com/api/song/lyric?id=${m[1]}&lv=1&tv=-1`, { headers: NE_H });
+      if (!r.ok) return json({ lrc: '' }, 502);
+      const d = await r.json();
+      return json({ lrc: d?.lrc?.lyric || '' });
+    });
+  }
+  return null;
+}
+
 async function api(req, env, url) {
   const path = url.pathname.replace(/^\/api\/?/, '');
   const rm = /^room\/([A-Za-z0-9]+)$/.exec(path);
   if (rm) return roomSocket(req, env, rm[1].toUpperCase());
+  if (path.startsWith('lyrics/') && req.method === 'GET') {
+    const r = await lyricsApi(req, url, path);
+    if (r) return r;
+  }
   if (!env.SONGS) return json({ error: 'song library not configured' }, 503);
   // list
   if (path === 'songs' && req.method === 'GET') {
