@@ -63,7 +63,6 @@ export function Home({ onSing, onMine }: { onSing(song: Song): void; onMine(): v
     (i) => !q.trim() || norm(i.title + i.artist).includes(norm(q)),
   );
   const shown = more || q ? items : items.slice(0, 9);
-  const featured = catalog[0];
   const recent = library(plays).slice(0, 6);
 
   const singChart = (i: ChartItem) => {
@@ -117,22 +116,6 @@ export function Home({ onSing, onMine }: { onSing(song: Song): void; onMine(): v
         </div>
       </section>
       {msg && <p className={'notice ' + (msg.bad ? 'warn' : 'ok')}>{msg.text}</p>}
-
-      {featured && (
-        <section className="h-feature" style={{ backgroundImage: featured.video ? `url(${maxres(featured.video)})` : undefined }}>
-          <div className="hero-shade" />
-          <div className="h-feature-body">
-            <span className="chip-ai">✨ {t('home.ai.badge')}</span>
-            <h2>
-              {featured.title} <small>{featured.artist}</small>
-            </h2>
-            <p className="muted small">{t('home.ai.desc')}</p>
-            <button className="btn primary" onClick={() => onSing({ id: 'cat:' + featured.slug, title: `${featured.title} · ${featured.artist}` })}>
-              🎤 {t('home.sing')}
-            </button>
-          </div>
-        </section>
-      )}
 
       {charts && list && (
         <section className="charts" id="charts">
