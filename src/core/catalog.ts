@@ -21,6 +21,8 @@ export interface Highlight {
 }
 
 export interface CatalogPackage {
+  /** false: notes and lyrics only; the song plays from its YouTube MV (no audio files hosted). */
+  audio?: boolean;
   slug: string;
   title: string;
   artist: string;
@@ -40,6 +42,7 @@ export interface Layered {
   title: string;
   notes: Note[];
   lines: LyricLine[];
+  /** Empty when the song has no hosted audio: it then plays from its YouTube MV. */
   inst: Float32Array[];
   voc: Float32Array[];
   rate: number;
@@ -108,6 +111,20 @@ export async function loadCatalog(slug: string): Promise<Layered> {
   const r = await fetch(dir + 'song.json');
   if (!r.ok) throw new Error(`song ${slug}: ${r.status}`);
   const pkg = (await r.json()) as CatalogPackage;
+  if (pkg.audio === false) {
+    const chart = packageToChart(pkg);
+    return {
+      title: `${pkg.title}${pkg.artist ? ' · ' + pkg.artist : ''}`,
+      notes: chart.notes,
+      lines: chart.lines,
+      inst: [],
+      voc: [],
+      rate: 0,
+      curve: pkg.curve,
+      highlights: pkg.highlights,
+      video: pkg.video,
+    };
+  }
   const Ctx: typeof AudioContext = window.AudioContext ?? (window as any).webkitAudioContext;
   const ctx = new Ctx();
   try {

@@ -65,6 +65,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   const [combo, setCombo] = useState(0);
   const popId = useRef(0);
   const comboRef = useRef(0);
+  const howlRef = useRef(false);
   const pop = (text: string, kind: string) => {
     const id = ++popId.current;
     setPops((p) => [...p.slice(-2), { id, text, kind }]);
@@ -83,13 +84,16 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   }, [isDemo, own, local, saved?.raw, saved?.kind]);
   const guide = !!chart?.hasPitch;
   const transpose = own ? key : saved?.transpose ?? 0;
+  // a catalog song without hosted audio plays its YouTube MV (with the original vocal), like KAREOKIE's web
+  const hasAudio = !!local && local.inst.length > 0;
+  const ytCat = own && !!local && !hasAudio && !!local.video;
 
   // Values the animation loop reads without restarting.
   const live = useRef({ chart, offset: 0, transpose: 0, latency: 0, title, layered: local as Layered | null });
   live.current = {
     layered: local,
     chart,
-    offset: own ? 0 : (saved?.offsetMs ?? 0) / 1000,
+    offset: own ? (ytCat ? local!.video!.offset : 0) : (saved?.offsetMs ?? 0) / 1000,
     transpose,
     latency: cfg.latencyMs / 1000,
     title,
@@ -136,7 +140,13 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
     setYtErr(null);
     const host = hostRef.current!;
     if (own && !local) return;
-    const tr: Transport = own
+    const plain = own && local!.inst.length === 0;
+    const tr: Transport = plain
+      ? new YouTubeTransport(host, local!.video!.id, {
+          onError: (code) =>
+            setYtErr(code === 101 || code === 150 ? 'stage.yt.embed' : code === -1 ? 'stage.yt.api' : 'stage.yt.gone'),
+        })
+      : own
       ? new LocalTransport(base.current!.inst, base.current!.voc, vocal, local!.rate)
       : isDemo
       ? new SynthTransport(demoChart(), () => settings.get().guideVolume)
@@ -151,7 +161,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
     transport.current = tr;
     // the MV as a muted picture that follows our audio clock
     let follow = 0;
-    if (own && local?.video) {
+    if (own && !plain && local?.video) {
       const v = local.video;
       const yt = new YouTubeTransport(host, v.id, { muted: true, onError: () => setYtErr(null) });
       video.current = yt;
@@ -184,7 +194,13 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
 
   /** Key change for your own song: re-pitch the backing and the guide vocal from the originals. */
   const changeKey = async (k: number) => {
-    if (!base.current || keyBusy || k === key) return;
+    if (k === key) return;
+    if (ytCat) {
+      // the MV's own key cannot change: move the notes you are scored on instead
+      setKey(k);
+      return;
+    }
+    if (!base.current || keyBusy) return;
     setKeyBusy(true);
     try {
       const b = base.current;
@@ -212,6 +228,11 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   };
 
   useEffect(() => () => mic.current.stop(), []);
+  const [howl, setHowl] = useState(false);
+  // hearing yourself follows the settings while the mic runs
+  useEffect(() => {
+    if (phase === 'live') mic.current.setMonitor(cfg.monitor, cfg.monitorVol, cfg.echo);
+  }, [phase, cfg.monitor, cfg.monitorVol, cfg.echo]);
 
   // keep the canvas sharp at any size
   useEffect(() => {
@@ -373,6 +394,10 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
 
       if (now - lastHud > 120) {
         lastHud = now;
+        if (mic.current.howl !== howlRef.current) {
+          howlRef.current = mic.current.howl;
+          setHowl(mic.current.howl);
+        }
         setHud({
           score: scorer.current.live(),
           note: frame.midi !== null ? midiName(frame.midi) : '',
@@ -593,20 +618,57 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
             )}
           </div>
 
+          <div className="card col">
+            <label className="check">
+              <input type="checkbox" checked={cfg.monitor} onChange={(e) => setCfg({ monitor: e.target.checked })} />
+              🎧 {t('stage.monitor')}
+            </label>
+            {cfg.monitor && (
+              <>
+                <label className="field">
+                  <span>
+                    {t('stage.monitorVol')} · {Math.round(cfg.monitorVol * 100)}%
+                  </span>
+                  <input type="range" min={0} max={1.5} step={0.05} value={cfg.monitorVol} onChange={(e) => setCfg({ monitorVol: Number(e.target.value) })} />
+                </label>
+                <label className="field">
+                  <span>
+                    {t('stage.echo')} · {Math.round(cfg.echo * 100)}%
+                  </span>
+                  <input type="range" min={0} max={1} step={0.05} value={cfg.echo} onChange={(e) => setCfg({ echo: Number(e.target.value) })} />
+                </label>
+                <small className="muted">{t('stage.monitorHint')}</small>
+              </>
+            )}
+            {howl && (
+              <div className="notice warn">
+                {t('stage.howl')}{' '}
+                <button className="btn small" onClick={() => mic.current.setMonitor(cfg.monitor, cfg.monitorVol, cfg.echo)}>
+                  {t('stage.howlOn')}
+                </button>
+              </div>
+            )}
+          </div>
+
           {own && local && (
             <div className="card col">
-              <label className="field">
-                <span>
-                  {t('mine.vocal')} · {Math.round(vocal * 100)}%
-                </span>
-                <input type="range" min={0} max={1} step={0.05} value={vocal} onChange={(e) => changeVocal(Number(e.target.value))} />
-              </label>
+              {hasAudio ? (
+                <label className="field">
+                  <span>
+                    {t('mine.vocal')} · {Math.round(vocal * 100)}%
+                  </span>
+                  <input type="range" min={0} max={1} step={0.05} value={vocal} onChange={(e) => changeVocal(Number(e.target.value))} />
+                </label>
+              ) : (
+                <p className="muted small">{t('stage.assisted')}</p>
+              )}
               <div className="field">
                 <span>
                   {t('stage.key')} · {key > 0 ? '+' : ''}
                   {key} {t('common.semitone')}
                   {keyBusy ? ' · ' + t('mine.keyBusy') : ''}
                 </span>
+                {ytCat && <small className="muted">{t('stage.keyNotes')}</small>}
                 <div className="row">
                   <button className="btn small" disabled={keyBusy || key <= -6} onClick={() => changeKey(key - 1)}>
                     ♭ −1

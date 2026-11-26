@@ -47,6 +47,20 @@ for key, p in ([] if SKIP_FILES else sorted(files)):
     size += len(b)
 flush()
 
+# 2b. remove files that are no longer part of the site (e.g. audio taken down)
+if not SKIP_FILES:
+    keep = {k for k, _ in files}
+    stale, cursor = [], ''
+    while True:
+        r = call('GET', f"/storage/kv/namespaces/{ns['id']}/keys?limit=1000" + (f'&cursor={cursor}' if cursor else ''))
+        stale += [k['name'] for k in r['result'] if k['name'] not in keep]
+        cursor = (r.get('result_info') or {}).get('cursor') or ''
+        if not cursor:
+            break
+    for i in range(0, len(stale), 1000):
+        call('POST', f"/storage/kv/namespaces/{ns['id']}/bulk/delete", stale[i:i + 1000])
+    print(f'  removed {len(stale)} old files' + (f": {', '.join(x for x in stale if 'catalog' in x)}" if stale else ''))
+
 # 3. the Worker (password: set once with --password; kept afterwards)
 pw = next((a.split('=', 1)[1] for a in sys.argv if a.startswith('--password=')), None)
 meta = {'main_module': 'worker.js', 'compatibility_date': '2026-10-01',

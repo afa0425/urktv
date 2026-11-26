@@ -19,6 +19,14 @@ export class MicPitch {
   private last: MicFrame = { midi: null, level: 0 };
   private lastAt = 0;
   private recent: (number | null)[] = [];
+  // hearing yourself: dry voice + a short echo, to the speakers/headphones
+  private monGain: GainNode | null = null;
+  private echoWet: GainNode | null = null;
+  private monitor = { on: false, level: 0.8, echo: 0.3 };
+  private loud = 0;
+  private howlPitch = -99;
+  /** Set when feedback (howling) was detected and the monitor switched itself off. */
+  howl = false;
 
   get running() {
     return !!this.analyser;
@@ -41,8 +49,53 @@ export class MicPitch {
     const an = this.ctx.createAnalyser();
     an.fftSize = FFT;
     an.smoothingTimeConstant = 0;
-    src.connect(an); // not connected to the speakers: no feedback
+    src.connect(an);
     this.analyser = an;
+
+    // monitor chain: voice -> gain -> out, voice -> delay(feedback) -> lowpass -> wet -> out
+    const ctx = this.ctx;
+    const mon = ctx.createGain();
+    const delay = ctx.createDelay(1);
+    delay.delayTime.value = 0.12;
+    const fb = ctx.createGain();
+    fb.gain.value = 0.32;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 3800;
+    const wet = ctx.createGain();
+    src.connect(mon);
+    mon.connect(ctx.destination);
+    mon.connect(delay);
+    delay.connect(lp);
+    lp.connect(fb);
+    fb.connect(delay);
+    lp.connect(wet);
+    wet.connect(ctx.destination);
+    this.monGain = mon;
+    this.echoWet = wet;
+    this.howl = false;
+    this.applyMonitor();
+  }
+
+  /** How you hear yourself. Off by default in the browser; the stage turns it on from settings. */
+  setMonitor(on: boolean, level: number, echo: number): void {
+    this.monitor = { on, level, echo };
+    if (on) this.howl = false;
+    this.applyMonitor();
+  }
+
+  /** What the browser reports as the extra delay of the output (seconds), for the hint. */
+  outputLatency(): number {
+    const c = this.ctx as (AudioContext & { outputLatency?: number }) | null;
+    return c ? (c.baseLatency || 0) + (c.outputLatency || 0) : 0;
+  }
+
+  private applyMonitor() {
+    if (!this.monGain || !this.echoWet || !this.ctx) return;
+    const t = this.ctx.currentTime;
+    const on = this.monitor.on && !this.howl;
+    this.monGain.gain.setTargetAtTime(on ? this.monitor.level : 0, t, 0.02);
+    this.echoWet.gain.setTargetAtTime(on ? this.monitor.echo * 0.9 : 0, t, 0.02);
   }
 
   stop(): void {
@@ -62,8 +115,23 @@ export class MicPitch {
     this.lastAt = now;
     this.analyser.getFloatTimeDomainData(this.buf);
     const level = Math.min(1, rms(this.buf) * 6);
+
     const p = detectPitch(this.buf, this.ctx.sampleRate);
     const raw = p ? freqToMidi(p.freq) : null;
+
+    // feedback guard: howling is one pitch at full level that does not let go; singing moves and breathes
+    if (this.monitor.on && !this.howl) {
+      if (level > 0.9 && raw !== null && Math.abs(raw - this.howlPitch) < 0.3) this.loud++;
+      else {
+        this.loud = 0;
+        this.howlPitch = raw ?? -99;
+      }
+      if (this.loud * MIN_INTERVAL_MS > 2500) {
+        this.howl = true;
+        this.loud = 0;
+        this.applyMonitor();
+      }
+    }
 
     // Median of the last 3 voiced values removes single-frame octave glitches.
     this.recent.push(raw);

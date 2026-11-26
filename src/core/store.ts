@@ -53,6 +53,10 @@ export interface Settings {
   /** Optional YouTube Data API key, only used for the in-app search. */
   ytKey: string;
   guideVolume: number;
+  /** Hear your own voice (with echo) while singing. */
+  monitor: boolean;
+  monitorVol: number;
+  echo: number;
 }
 
 export const DEMO_ID = 'demo';
@@ -86,6 +90,9 @@ export const settings = persisted<Settings>('hs.settings', {
   micId: '',
   ytKey: '',
   guideVolume: 0.5,
+  monitor: true,
+  monitorVol: 0.8,
+  echo: 0.3,
 });
 export const queue = persisted<Song[]>('hs.queue', []);
 export const history = persisted<Play[]>('hs.history', []);
