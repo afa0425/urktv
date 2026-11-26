@@ -4,7 +4,10 @@ import { midiName } from '../audio/pitch';
 import { detectKind, lineAt, parseChart, type Chart } from '../core/chart';
 import { foldNear, FreeScorer, GuideScorer, type Difficulty, type ScoreExtras, type Scorer, type ScoreResult } from '../core/score';
 import { charts, DEMO_ID, renameSong, settings, useStore, type Song } from '../core/store';
-import { demoChart, LocalTransport, SynthTransport, toUltraStar, YouTubeTransport, type Transport } from '../core/transport';
+import { demoChart, DualTransport, LocalTransport, SynthTransport, toUltraStar, YouTubeTransport, type Transport } from '../core/transport';
+import { extPost, LEAD, useExtension } from '../core/extension';
+import { MODELS } from '../separate/mdx';
+import { MODEL_BASE, ORT_BASE } from '../separate/client';
 import { runWorker } from '../separate/client';
 import { fromInt16, getLocal, isLocal } from '../separate/db';
 import { computeHighlights, isCatalog, loadCatalog, type Layered } from '../core/catalog';
@@ -50,6 +53,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   const video = useRef<YouTubeTransport | null>(null);
 
   const hostRef = useRef<HTMLDivElement>(null);
+  const leadRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const transport = useRef<Transport | null>(null);
@@ -87,6 +91,11 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   // a catalog song without hosted audio plays its YouTube MV (with the original vocal), like KAREOKIE's web
   const hasAudio = !!local && local.inst.length > 0;
   const ytCat = own && !!local && !hasAudio && !!local.video;
+  // with the URKTV extension (computer Chrome) the MV's vocal is removed on this computer, live
+  const ext = useExtension();
+  const [wantBacking, setWantBacking] = useState(true);
+  const backing = ytCat && ext.present && ext.consent && wantBacking;
+  const [countdown, setCountdown] = useState(0);
 
   // Values the animation loop reads without restarting.
   const live = useRef({ chart, offset: 0, transpose: 0, latency: 0, title, layered: local as Layered | null });
@@ -141,7 +150,15 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
     const host = hostRef.current!;
     if (own && !local) return;
     const plain = own && local!.inst.length === 0;
-    const tr: Transport = plain
+    const ytErrCb = (code: number) =>
+      setYtErr(code === 101 || code === 150 ? 'stage.yt.embed' : code === -1 ? 'stage.yt.api' : 'stage.yt.gone');
+    const tr: Transport = plain && backing
+      ? new DualTransport(
+          new YouTubeTransport(host, local!.video!.id, { muted: true, onError: ytErrCb }),
+          new YouTubeTransport(leadRef.current!, local!.video!.id, { onError: ytErrCb }),
+          LEAD,
+        )
+      : plain
       ? new YouTubeTransport(host, local!.video!.id, {
           onError: (code) =>
             setYtErr(code === 101 || code === 150 ? 'stage.yt.embed' : code === -1 ? 'stage.yt.api' : 'stage.yt.gone'),
@@ -181,15 +198,30 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
       video.current?.destroy();
       video.current = null;
       tr.destroy();
+      if (tr instanceof DualTransport) extPost({ type: 'stop' });
       if (!isDemo) host.replaceChildren();
+      leadRef.current?.replaceChildren();
       transport.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [song.id, isDemo, own, local, run]);
+  }, [song.id, isDemo, own, local, run, backing]);
+
+  // backing via the extension: tell it where the picture is, keep the lead player in front
+  useEffect(() => {
+    if (phase !== 'live' || !backing) return;
+    const id = window.setInterval(() => {
+      const tr = transport.current;
+      if (!(tr instanceof DualTransport)) return;
+      tr.keepAhead();
+      extPost({ type: 'clock', t: tr.time(), playing: tr.playing() }); // MV time, same clock as the tapped audio
+    }, 200);
+    return () => window.clearInterval(id);
+  }, [phase, backing, local]);
 
   const changeVocal = (v: number) => {
     setVocal(v);
     if (transport.current instanceof LocalTransport) transport.current.setVocal(v);
+    if (transport.current instanceof DualTransport) extPost({ type: 'vocal', level: v });
   };
 
   /** Key change for your own song: re-pitch the backing and the guide vocal from the originals. */
@@ -437,7 +469,20 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
         }
       }
     }
-    transport.current?.play();
+    const tr = transport.current;
+    if (tr instanceof DualTransport) {
+      // the lead player starts first; the AI gets LEAD seconds of head start
+      const m = MODELS.kara2;
+      extPost({ type: 'start', lead: LEAD, vocal, mode: 'auto', modelUrl: MODEL_BASE + m.file, ortBase: ORT_BASE, model: 'kara2' });
+      tr.startStaggered(() => setCountdown(0));
+      setCountdown(LEAD);
+      const t0 = performance.now();
+      const cd = window.setInterval(() => {
+        const left = Math.ceil(LEAD - (performance.now() - t0) / 1000);
+        setCountdown(Math.max(0, left));
+        if (left <= 0) window.clearInterval(cd);
+      }, 250);
+    } else tr?.play();
     setPhase('live');
   };
 
@@ -509,6 +554,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
             )}
           </div>
 
+          {countdown > 0 && <div className="notice ok countdown">🎛️ {t('ext.countdown', { n: countdown })}</div>}
           <div className="lyrics" aria-live="off">
             {cur ? (
               <>
@@ -562,6 +608,66 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
               {fmt(hud.time)} / {fmt(hud.dur)}
             </div>
           </div>
+
+          {ytCat && (
+            <div className="card col">
+              <div className="label">{t('ext.title')}</div>
+              {!ext.present && (
+                <p className="muted small">
+                  {t('ext.install')}{' '}
+                  <a href="extension.html" target="_blank" rel="noopener">
+                    {t('ext.how')}
+                  </a>
+                </p>
+              )}
+              {ext.present && !ext.consent && (
+                <>
+                  <p className="small">{t('ext.consent')}</p>
+                  <div className="row wrap">
+                    <button className="btn primary small" onClick={() => extPost({ type: 'consent', ok: true })}>
+                      {t('ext.agree')}
+                    </button>
+                    <button className="btn small" onClick={() => setWantBacking(false)}>
+                      {t('ext.original')}
+                    </button>
+                  </div>
+                </>
+              )}
+              {ext.present && ext.consent && (
+                <>
+                  <label className="check">
+                    <input type="checkbox" checked={wantBacking} disabled={phase === 'live'} onChange={(e) => setWantBacking(e.target.checked)} />
+                    {t('ext.on')}
+                  </label>
+                  {backing && (
+                    <>
+                      {/* the lead player must stay visible and uncovered (YouTube rules): it sits here, not over the MV */}
+                      <div className="lead-box" title={t('ext.leadTitle')}>
+                        <span className="lead-label">{t('ext.lead')}</span>
+                        <div className="lead-host" ref={leadRef} />
+                      </div>
+                      <label className="field">
+                        <span>
+                          {t('mine.vocal')} · {Math.round(vocal * 100)}%
+                        </span>
+                        <input type="range" min={0} max={1} step={0.05} value={vocal} onChange={(e) => changeVocal(Number(e.target.value))} />
+                      </label>
+                      {ext.status && (
+                        <small className="muted">
+                          {ext.status.state === 'loading'
+                            ? t('ext.loading')
+                            : ext.status.mode === 'ai'
+                              ? t('ext.ai', { x: (ext.status.speed ?? 0).toFixed(1) })
+                              : t('ext.classic')}
+                          {ext.status.buffered !== undefined && phase === 'live' ? ' · ' + t('ext.ahead', { s: Math.max(0, ext.status.buffered).toFixed(1) }) : ''}
+                        </small>
+                      )}
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          )}
 
           {phase === 'live' && (
             <div className="card col">
@@ -660,7 +766,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
                   <input type="range" min={0} max={1} step={0.05} value={vocal} onChange={(e) => changeVocal(Number(e.target.value))} />
                 </label>
               ) : (
-                <p className="muted small">{t('stage.assisted')}</p>
+                <p className="muted small">{backing ? t('ext.backingNote') : t('stage.assisted')}</p>
               )}
               <div className="field">
                 <span>

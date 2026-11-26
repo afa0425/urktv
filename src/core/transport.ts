@@ -392,3 +392,62 @@ export function toUltraStar(title: string, notes: Note[]): string {
   rows.push('E');
   return rows.join('\n') + '\n';
 }
+
+/**
+ * Two YouTube players of the same MV: the small "lead" player runs LEAD seconds ahead and its sound
+ * goes to the URKTV extension (which turns it into the backing track on this computer); the big main
+ * player is muted and is the clock everything follows.
+ */
+export class DualTransport implements Transport {
+  constructor(
+    readonly main: YouTubeTransport,
+    readonly lead: YouTubeTransport,
+    readonly ahead: number,
+  ) {}
+  private timer = 0;
+  time() {
+    return this.main.time();
+  }
+  duration() {
+    return this.main.duration();
+  }
+  playing() {
+    return this.main.playing();
+  }
+  ended() {
+    return this.main.ended();
+  }
+  /** First start: the lead player starts now, the picture `ahead` seconds later. */
+  startStaggered(onMainStart?: () => void) {
+    this.lead.play();
+    window.clearTimeout(this.timer);
+    this.timer = window.setTimeout(() => {
+      this.main.play();
+      onMainStart?.();
+    }, this.ahead * 1000);
+  }
+  play() {
+    this.lead.play();
+    this.main.play();
+  }
+  pause() {
+    window.clearTimeout(this.timer);
+    this.lead.pause();
+    this.main.pause();
+  }
+  seek(t: number) {
+    this.main.seek(t);
+    this.lead.seek(t + this.ahead);
+  }
+  /** Keep the lead exactly `ahead` seconds in front (buffering can make them drift). */
+  keepAhead() {
+    if (!this.main.playing() || !this.lead.playing()) return;
+    const d = this.lead.time() - this.main.time() - this.ahead;
+    if (Math.abs(d) > 0.6) this.lead.seek(this.main.time() + this.ahead);
+  }
+  destroy() {
+    window.clearTimeout(this.timer);
+    this.lead.destroy();
+    this.main.destroy();
+  }
+}

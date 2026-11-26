@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>安裝即時伴奏擴充功能｜URKTV</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #12101a; color: #f3f0fa; font: 16px/1.7 system-ui, 'Noto Sans TC', sans-serif; }
+  main { max-width: 680px; margin: 0 auto; padding: 28px 16px 60px; }
+  h1 { font-size: 1.6rem; margin: 0 0 8px; }
+  .muted { color: #a49db8; }
+  .card { background: #211d2e; border: 1px solid rgba(255,255,255,.1); border-radius: 14px; padding: 16px 18px; margin: 18px 0; }
+  ol { padding-left: 1.3em; } li { margin: 8px 0; }
+  code { background: #0d0b14; padding: 2px 6px; border-radius: 6px; }
+  .btn { display: inline-block; padding: 12px 22px; border-radius: 12px; font-weight: 800; text-decoration: none;
+         color: #1a0f16; background: linear-gradient(135deg, #ff5c8a, #ffb347); }
+  a { color: #ffb347; }
+</style>
+</head>
+<body>
+<main>
+  <p><a href="index.html">← 回到 URKTV</a></p>
+  <h1>安裝「URKTV 即時伴奏」擴充功能</h1>
+  <p class="muted">裝了以後，用電腦的 Chrome 唱歌庫裡的歌，就能唱沒有原唱的伴奏版。原唱是在你自己的電腦上即時拿掉的：聲音不上傳、不存檔。手機暫時不支援。</p>
+
+  <p><a class="btn" href="urktv-extension.zip" download>下載擴充功能（zip）</a></p>
+
+  <div class="card">
+    <strong>安裝步驟（測試版，約 1 分鐘）</strong>
+    <ol>
+      <li>把下載的 <code>urktv-extension.zip</code> 解壓縮，得到一個資料夾（放在不會被刪掉的地方）。</li>
+      <li>在 Chrome 網址列輸入 <code>chrome://extensions</code>，按 Enter。</li>
+      <li>打開右上角的「<strong>開發人員模式</strong>」。</li>
+      <li>按「<strong>載入未封裝項目</strong>」，選剛剛解壓縮的資料夾。</li>
+      <li>回到 URKTV，重新整理頁面。開一首歌，右側會出現「伴奏版」，按同意就能唱。</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <strong>建議</strong>
+    <ul>
+      <li>戴耳機唱，評分最準。</li>
+      <li>有獨立顯示卡的電腦：Windows「設定 → 系統 → 顯示器 → 圖形」把 Chrome 設成「高效能」，AI 去人聲會快很多。</li>
+      <li>電腦跑不動 AI 時，會自動改用傳統消人聲，照樣能唱。</li>
+      <li>想知道你的電腦夠不夠快：<a href="bench.html">去人聲測速</a>。</li>
+    </ul>
+  </div>
+  <p class="muted">測試版尚未上架 Chrome 線上應用程式商店，所以要用開發人員模式安裝。</p>
+</main>
+</body>
+</html>

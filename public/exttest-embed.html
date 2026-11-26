@@ -1,0 +1,8 @@
+<!doctype html><html><body style="margin:0;background:#000">
+<!-- Dev test only: stands in for a YouTube embed (this sandbox cannot reach YouTube). -->
+<video id="v" src="bench/clip.mp3" style="width:100%;height:100%" playsinline></video>
+<script>
+  const v = document.getElementById('v');
+  v.muted = new URLSearchParams(location.search).get('muted') === '1';
+</script>
+</body></html>

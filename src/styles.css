@@ -1014,3 +1014,34 @@ a.btn {
     padding: 20px;
   }
 }
+
+/* extension: the lead player (YouTube requires it visible, uncovered and at least 200x200) */
+.lead-box {
+  position: relative;
+  width: 200px;
+  height: 200px;
+  margin-top: 18px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #000;
+}
+.lead-host,
+.lead-host iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 12px;
+}
+.lead-label {
+  position: absolute;
+  left: 0;
+  top: -18px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.countdown {
+  text-align: center;
+  font-weight: 700;
+}

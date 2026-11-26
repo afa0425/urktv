@@ -80,7 +80,7 @@ export async function listCatalog(): Promise<CatalogEntry[]> {
   for (const url of [apiBase() + 'songs', base() + 'index.json']) {
     try {
       const r = await fetch(url, { cache: 'no-cache' });
-      if (!r.ok) continue;
+      if (!r.ok || !/json/.test(r.headers.get('content-type') || '')) continue;
       for (const s of ((await r.json()).songs ?? []) as CatalogEntry[]) if (!out.has(s.slug)) out.set(s.slug, s);
     } catch {
       /* this source is not available */
@@ -116,7 +116,8 @@ async function decode(url: string, ctx: BaseAudioContext): Promise<Float32Array[
 export async function loadCatalog(slug: string): Promise<Layered> {
   const dir = base() + encodeURIComponent(slug) + '/';
   let r = await fetch(apiBase() + 'songs/' + encodeURIComponent(slug), { cache: 'no-cache' }).catch(() => null);
-  if (!r || !r.ok) r = await fetch(dir + 'song.json');
+  // a static host may answer unknown paths with the home page: only take JSON
+  if (!r || !r.ok || !/json/.test(r.headers.get('content-type') || '')) r = await fetch(dir + 'song.json');
   if (!r.ok) throw new Error(`song ${slug}: ${r.status}`);
   const pkg = (await r.json()) as CatalogPackage;
   if (pkg.audio === false) {

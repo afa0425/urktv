@@ -9,8 +9,9 @@
     "preview": "vite preview",
     "test": "vitest run",
     "predev": "node scripts/copy-ort.mjs",
-    "prebuild": "node scripts/copy-ort.mjs",
-    "models": "bash scripts/fetch-models.sh"
+    "prebuild": "node scripts/copy-ort.mjs && node scripts/pack-extension.mjs",
+    "models": "bash scripts/fetch-models.sh",
+    "ext": "node scripts/pack-extension.mjs"
   },
   "dependencies": {
     "onnxruntime-web": "^1.20.1",
@@ -18,6 +19,7 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@types/chrome": "^0.0.287",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
