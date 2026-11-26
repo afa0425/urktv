@@ -100,4 +100,36 @@ export class LiveNotes {
     }
     return { off: Math.round(off * 10) / 10, voiced: voiced * h };
   }
+
+  /**
+   * Character timings for a lyric line that only has a start time: the characters are spread over
+   * the moments the separated vocal actually sings in [a, b] (media seconds). Null when too little
+   * singing is known there yet.
+   */
+  charTimes(text: string, a: number, b: number): { start: number; end: number; text: string }[] | null {
+    const h = this.hop;
+    const ts: number[] = [];
+    for (let k = Math.ceil(a / h); k <= Math.floor(b / h); k++) {
+      // a frame counts if it or its neighbours are voiced (bridges consonants)
+      const v = this.frames.get(k) ?? null;
+      const n = (this.frames.get(k - 1) ?? null) !== null && (this.frames.get(k + 1) ?? null) !== null;
+      if (v !== null || n) ts.push(k * h);
+    }
+    if (ts.length * h < 0.4) return null;
+    const chars = [...text];
+    const units = chars.filter((c) => c.trim()).length || 1;
+    const out: { start: number; end: number; text: string }[] = [];
+    let u = 0;
+    for (const c of chars) {
+      if (!c.trim()) {
+        out.push({ start: out.length ? out[out.length - 1].end : ts[0], end: out.length ? out[out.length - 1].end : ts[0], text: c });
+        continue;
+      }
+      const i0 = Math.floor((u * ts.length) / units);
+      const i1 = Math.max(i0, Math.floor(((u + 1) * ts.length) / units) - 1);
+      out.push({ start: ts[i0], end: ts[i1] + h, text: c });
+      u++;
+    }
+    return out;
+  }
 }

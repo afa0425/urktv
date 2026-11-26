@@ -15,3 +15,18 @@ describe('LiveNotes', () => {
     expect(ln.between(17, 22).length).toBeGreaterThan(0);
   });
 });
+
+describe('charTimes', () => {
+  it('spreads characters over the sung moments only', () => {
+    const ln = new LiveNotes();
+    const hop = 512 / 22050;
+    const midi: (number | null)[] = [];
+    // sings 1.0-2.0 and 3.0-4.0, silent between
+    for (let t = 0; t < 5; t += hop) midi.push((t >= 1 && t < 2) || (t >= 3 && t < 4) ? 62 : null);
+    ln.add(0, hop, midi);
+    const p = ln.charTimes('我愛你嗎', 0.5, 4.5)!;
+    expect(p[0].start).toBeCloseTo(1, 1);
+    expect(p[2].start).toBeCloseTo(3, 1); // third character waits for the second phrase
+    expect(p[3].end).toBeCloseTo(4, 1);
+  });
+});

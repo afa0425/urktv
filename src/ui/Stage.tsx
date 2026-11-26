@@ -134,7 +134,6 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   const ytAny = ytCat || ytPlain;
   const backing = ytAny && ext.present && ext.consent && wantBacking;
   const [backingFailed, setBackingFailed] = useState(false);
-  const [diagOpen, setDiagOpen] = useState(false);
   const [drag, setDrag] = useState<number | null>(null);
   const [lyricsNote, setLyricsNote] = useState('');
   const triedLyrics = useRef('');
@@ -635,6 +634,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
     }
     localStorage.setItem('urktv.bmode', m);
     setBmode(m);
+    if (!ext.consent) extPost({ type: 'consent', ok: true }); // picking a backing is the consent
     if (!backing) {
       setWantBacking(true);
       if (phase === 'live') setPhase('ready'); // the players are rebuilt: press start again
@@ -797,6 +797,17 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
     return -1;
   };
 
+  /** A web-lyrics line's characters, timed to where the separated vocal sings (else an estimate). */
+  const lrcParts = (j: number) => {
+    const line = chart!.lines[j];
+    const off = live.current.offset;
+    const next = chart!.lines[j + 1]?.start ?? line.start + 12;
+    const est = [{ start: line.start, end: Math.min(line.end, line.start + sungDur(line.text)), text: line.text }];
+    if (!liveNotes.current.has()) return est;
+    const parts = liveNotes.current.charTimes(line.text, line.start + off - 0.5, Math.min(next, line.start + sungDur(line.text) * 1.8) + off - 0.15);
+    return parts ? parts.map((p) => ({ ...p, start: p.start - off, end: p.end - off })) : est;
+  };
+
   return (
     <div className="stage">
       <header className="stage-top">
@@ -844,33 +855,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
               </div>
             )}
           </div>
-          {ytAny && ext.present && ext.consent && !backingFailed && (
-            <div className="sing-mode">
-              <div className="seg" role="radiogroup">
-                {(['orig', 'fast', 'ai'] as const).map((m) => {
-                  const on = m === 'orig' ? !backing || vocal >= 0.5 : backing && vocal < 0.5 && bmode === m;
-                  return (
-                    <button key={m} role="radio" aria-checked={on} className={'seg-btn' + (on ? ' on' : '')} onClick={() => pickMode(m)}>
-                      {m === 'orig' ? '🎤 原唱' : m === 'fast' ? '⚡ 快速伴奏' : '✨ AI 伴奏'}
-                    </button>
-                  );
-                })}
-              </div>
-              <p className="muted small sing-mode-note">
-                {!backing || vocal >= 0.5
-                  ? '播原本的 MV 聲音'
-                  : bmode === 'fast'
-                    ? '你的電腦即時去人聲：馬上開始，人聲會有點悶'
-                    : (() => {
-                        const sp = aiSpeed();
-                        if (!sp) return '你的電腦用 AI 即時去人聲：最乾淨，第一次會先測你的電腦速度';
-                        const w = Math.round(aiNeed(sp, hud.dur || 240));
-                        return `你的電腦用 AI 即時去人聲：最乾淨 · 你的電腦 ${sp.toFixed(1)} 倍速` + (sp >= 1.15 ? '，幾秒就開始' : `，開始前要先等約 ${w} 秒`);
-                      })()}
-              </p>
-            </div>
-          )}
-          <div className="ktv" ref={ktvRef} aria-live="off">
+          <div className={'ktv' + (chart && chart.lines.length ? '' : ' empty')} ref={ktvRef} aria-live="off">
             {chart && chart.lines.length > 0 ? (
               [0, 1].map((row) => {
                 const j = ktvLine(row);
@@ -881,7 +866,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
                   <p key={row} className={'ktv-row ' + (row ? 'r' : 'l') + (j === li ? ' now' : '')}>
                     {dots > 0 && <span className="ktv-dots">{'●'.repeat(dots)}</span>}
                     {line &&
-                      (line.parts.length ? line.parts : [{ start: line.start, end: Math.min(line.end, line.start + sungDur(line.text)), text: line.text }]).map((p, k) => (
+                      (line.parts.length ? line.parts : lrcParts(j)).map((p, k) => (
                         <span
                           key={k}
                           className="ktv-ch"
@@ -898,34 +883,73 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
             )}
           </div>
 
-          {phase === 'live' && !isDemo && (
-            <div className="seekbar">
-              <button className="btn small" onClick={() => seekTo(hud.time - 10)} aria-label="-10">
-                ⏪ 10
+          {phase === 'live' && (
+            <div className="stage-bar">
+              <button className="btn icon play" onClick={() => (hud.playing ? transport.current?.pause() : transport.current?.play())} aria-label={hud.playing ? t('stage.pause') : t('stage.resume')}>
+                {hud.playing ? '❚❚' : '▶'}
               </button>
-              <span className="seek-time">{fmt(drag ?? hud.time)}</span>
-              <input
-                className="seek"
-                type="range"
-                min={0}
-                max={Math.max(1, Math.floor(hud.dur))}
-                step={1}
-                value={drag ?? Math.floor(hud.time)}
-                aria-label={t('stage.seek')}
-                onChange={(e) => setDrag(Number(e.target.value))}
-                onPointerUp={() => drag !== null && (seekTo(drag), setDrag(null))}
-                onKeyUp={() => drag !== null && (seekTo(drag), setDrag(null))}
-                onBlur={() => setDrag(null)}
-              />
-              <span className="seek-time">{fmt(hud.dur)}</span>
-              <button className="btn small" onClick={() => seekTo(hud.time + 10)} aria-label="+10">
-                10 ⏩
-              </button>
-              {firstVoice() !== null && hud.time < (firstVoice() ?? 0) && (
-                <button className="btn small" onClick={() => seekTo(firstVoice()!)}>
-                  {t('stage.skipIntro')}
-                </button>
+              {!isDemo && (
+                <>
+                  <button className="btn icon" onClick={() => seekTo(hud.time - 10)} aria-label="-10">⏪</button>
+                  <span className="seek-time">{fmt(drag ?? hud.time)}</span>
+                  <input
+                    className="seek"
+                    type="range"
+                    min={0}
+                    max={Math.max(1, Math.floor(hud.dur))}
+                    step={1}
+                    value={drag ?? Math.floor(hud.time)}
+                    aria-label={t('stage.seek')}
+                    style={{ ['--p' as string]: `${hud.dur ? ((drag ?? hud.time) / hud.dur) * 100 : 0}%` } as React.CSSProperties}
+                    onChange={(e) => setDrag(Number(e.target.value))}
+                    onPointerUp={() => drag !== null && (seekTo(drag), setDrag(null))}
+                    onKeyUp={() => drag !== null && (seekTo(drag), setDrag(null))}
+                    onBlur={() => setDrag(null)}
+                  />
+                  <span className="seek-time">{fmt(hud.dur)}</span>
+                  <button className="btn icon" onClick={() => seekTo(hud.time + 10)} aria-label="+10">⏩</button>
+                  {firstVoice() !== null && hud.time < (firstVoice() ?? 0) && (
+                    <button className="btn small" onClick={() => seekTo(firstVoice()!)}>
+                      {t('stage.skipIntro')}
+                    </button>
+                  )}
+                </>
               )}
+            </div>
+          )}
+          {ytAny && !backingFailed && (
+            <div className="sing-mode">
+              <div className="seg big" role="radiogroup" aria-label="原唱或伴奏">
+                {(['orig', 'fast', 'ai'] as const).map((m) => {
+                  const on = m === 'orig' ? !backing || vocal >= 0.5 : backing && vocal < 0.5 && bmode === m;
+                  return (
+                    <button key={m} role="radio" aria-checked={on} disabled={m !== 'orig' && !ext.present} className={'seg-btn' + (on ? ' on' : '')} onClick={() => pickMode(m)}>
+                      {m === 'orig' ? '🎤 原唱' : m === 'fast' ? '⚡ 快速伴奏' : '✨ AI 伴奏'}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="muted small sing-mode-note">
+                {!ext.present ? (
+                  <>
+                    伴奏要裝免費擴充功能（電腦 Chrome）·{' '}
+                    <a href="extension.html" target="_blank" rel="noopener">
+                      一分鐘裝好
+                    </a>
+                  </>
+                ) : !backing || vocal >= 0.5 ? (
+                  '播原本的 MV 聲音'
+                ) : bmode === 'fast' ? (
+                  '你的電腦即時去人聲：馬上開始，人聲會有點悶'
+                ) : (
+                  (() => {
+                    const sp = aiSpeed();
+                    if (!sp) return '你的電腦用 AI 即時去人聲：最乾淨，第一次會先測你的電腦速度';
+                    const w = Math.round(aiNeed(sp, hud.dur || 240));
+                    return `你的電腦用 AI 即時去人聲：最乾淨 · ${sp.toFixed(1)} 倍速` + (sp >= 1.15 ? '，幾秒就開始' : `，開始前要先等約 ${w} 秒`);
+                  })()
+                )}
+              </p>
             </div>
           )}
           {lyricsNote && <p className="muted small lyric-src">{lyricsNote}</p>}
@@ -940,7 +964,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
             </div>
           )}
           {saved?.kind === 'lrc' && phase === 'live' && (
-            <div className="row center lyric-nudge">
+            <div className="lyric-nudge">
               <button className="btn small" onClick={() => ((manualLyrics.current = true), patchChart({ offsetMs: (saved.offsetMs ?? 0) - 500 }))}>
                 {t('stage.lyricsEarlier')}
               </button>
@@ -988,105 +1012,73 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
             </div>
           </div>
 
-          {ytAny && (
-            <div className="card col">
-              <div className="label">{t('ext.title')}</div>
-              {backingFailed && <p className="notice warn">{t('ext.failed')}</p>}
-              {/* always here, even when the extension is not detected: that is the case to diagnose */}
-              <button
-                className="btn small diag-btn"
-                onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(diagText());
-                    setDiagCopied(true);
-                  } catch {
-                    setDiagOpen(true);
-                  }
-                }}
-              >
-                📋 {diagCopied ? t('ext.diagCopied') : t('ext.diagCopy')}
-              </button>
-              <button className="btn link small" onClick={() => setDiagOpen((o) => !o)}>
-                {diagOpen ? t('ext.diagHide') : t('ext.diagShow')}
-              </button>
-              {diagOpen && <pre className="diag-pre">{diagText()}</pre>}
-              <a className="small" href="extension.html" target="_blank" rel="noopener">
-                {ext.present ? `擴充功能 v${ext.version}` : '安裝擴充功能'}
-              </a>
-              {!ext.present && (
-                <p className="muted small">
-                  {t('ext.install')}{' '}
-                  <a href="extension.html" target="_blank" rel="noopener">
-                    {t('ext.how')}
-                  </a>
-                </p>
-              )}
-              {ext.present && !ext.consent && (
-                <>
-                  <p className="small">{t('ext.consent')}</p>
-                  <div className="row wrap">
-                    <button className="btn primary small" onClick={() => extPost({ type: 'consent', ok: true })}>
-                      {t('ext.agree')}
-                    </button>
-                    <button className="btn small" onClick={() => setWantBacking(false)}>
-                      {t('ext.original')}
-                    </button>
-                  </div>
-                </>
-              )}
-              {ext.present && ext.consent && (
-                <>
-                  {backing && (
-                    <>
-                      {/* the lead player must stay visible and uncovered (YouTube rules): it sits here, not over the MV */}
-                      <div className="lead-box" title={t('ext.leadTitle')}>
-                        <span className="lead-label">{t('ext.lead')}</span>
-                        <div className="lead-host" ref={leadRef} />
-                      </div>
-                      <label className="field">
-                        <span>
-                          {t('mine.vocal')} · {Math.round(vocal * 100)}%
-                        </span>
-                        <input type="range" min={0} max={1} step={0.05} value={vocal} onChange={(e) => changeVocal(Number(e.target.value))} />
-                      </label>
-                      {ext.status && (
-                        <small className="muted">
-                          {ext.status.state === 'error'
-                            ? t(ext.status.message === 'audio-blocked' ? 'ext.blocked' : 'ext.error')
-                            : ext.status.state === 'loading'
-                            ? t('ext.loading')
-                            : ext.status.mode === 'ai'
-                              ? t('ext.ai', { x: (ext.status.speed ?? 0).toFixed(1) })
-                              : t('ext.classic')}
-                          {ext.status.buffered !== undefined && phase === 'live' ? ' · ' + t('ext.ahead', { s: Math.max(0, ext.status.buffered).toFixed(1) }) : ''}
-                        </small>
-                      )}
-                    </>
-                  )}
-                </>
-              )}
-            </div>
-          )}
-
           {phase === 'live' && (
             <div className="card col">
-              <button
-                className="btn"
-                onClick={() => (hud.playing ? transport.current?.pause() : transport.current?.play())}
-              >
-                {hud.playing ? t('stage.pause') : t('stage.resume')}
-              </button>
-
-              <button className="btn" onClick={restart}>
-                {t('stage.restart')}
-              </button>
               <button className="btn primary" onClick={finish}>
                 {t('stage.finish')}
+              </button>
+              <button className="btn" onClick={restart}>
+                {t('stage.restart')}
               </button>
               {nextTitle && <p className="muted small">{t('queue.next', { title: nextTitle })}</p>}
             </div>
           )}
 
+          {ytAny && (
+            <div className="card col backing-card">
+              {backingFailed && <p className="notice warn">{t('ext.failed')}</p>}
+              {backing && (
+                <>
+                  {/* the lead player must stay visible and uncovered (YouTube rules): it sits here, not over the MV */}
+                  <div className="lead-box" title={t('ext.leadTitle')}>
+                    <span className="lead-label">{t('ext.lead')}</span>
+                    <div className="lead-host" ref={leadRef} />
+                  </div>
+                  {ext.status && (
+                    <small className="muted">
+                      {ext.status.state === 'error'
+                        ? t(ext.status.message === 'audio-blocked' ? 'ext.blocked' : 'ext.error')
+                        : ext.status.state === 'loading'
+                          ? t('ext.loading')
+                          : ext.status.mode === 'ai'
+                            ? t('ext.ai', { x: (ext.status.speed ?? 0).toFixed(1) })
+                            : t('ext.classic')}
+                      {ext.status.buffered !== undefined && phase === 'live' ? ' · ' + t('ext.ahead', { s: Math.max(0, ext.status.buffered).toFixed(1) }) : ''}
+                    </small>
+                  )}
+                  <label className="field">
+                    <span>
+                      {t('mine.vocal')} · {Math.round(vocal * 100)}%
+                    </span>
+                    <input type="range" min={0} max={1} step={0.05} value={vocal} onChange={(e) => changeVocal(Number(e.target.value))} />
+                  </label>
+                </>
+              )}
+              <details className="diag">
+                <summary className="small muted">{ext.present ? `擴充功能 v${ext.version}` : '擴充功能未安裝'} · 診斷</summary>
+                <button
+                  className="btn small diag-btn"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(diagText());
+                      setDiagCopied(true);
+                    } catch {
+                      /* the text is shown below to copy by hand */
+                    }
+                  }}
+                >
+                  📋 {diagCopied ? t('ext.diagCopied') : t('ext.diagCopy')}
+                </button>
+                <pre className="diag-pre">{diagText()}</pre>
+                <a className="small" href="extension.html" target="_blank" rel="noopener">
+                  安裝／更新擴充功能
+                </a>
+              </details>
+            </div>
+          )}
+
+          <details className="card col more-settings">
+            <summary>⚙️ 更多設定</summary>
           <div className="card col">
             <label className="field">
               <span>{t('stage.difficulty')}</span>
@@ -1155,6 +1147,8 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
               </div>
             )}
           </div>
+
+          </details>
 
           {own && local && (
             <div className="card col">

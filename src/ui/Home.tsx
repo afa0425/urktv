@@ -3,6 +3,7 @@ import { listCatalog, type CatalogEntry } from '../core/catalog';
 import { DEMO_ID, enqueue, history, library, useStore, type Song } from '../core/store';
 import { parseVideoId, thumbUrl } from '../core/transport';
 import { useT } from '../i18n';
+import { EXT_LATEST, extOutdated, useExtension } from '../core/extension';
 
 interface ChartItem {
   rank: number;
@@ -39,6 +40,8 @@ export function Home({ onSing, onMine }: { onSing(song: Song): void; onMine(): v
   const [link, setLink] = useState('');
   const [q, setQ] = useState('');
   const [msg, setMsg] = useState<{ text: string; bad?: boolean } | null>(null);
+  const ext = useExtension();
+  const aiSpeed = Number(localStorage.getItem('urktv.aiSpeed')) || 0;
 
   useEffect(() => {
     void listCatalog().then(setCatalog);
@@ -59,7 +62,7 @@ export function Home({ onSing, onMine }: { onSing(song: Song): void; onMine(): v
   const items = (list?.items ?? []).filter(
     (i) => !q.trim() || norm(i.title + i.artist).includes(norm(q)),
   );
-  const shown = more || q ? items : items.slice(0, 10);
+  const shown = more || q ? items : items.slice(0, 9);
   const featured = catalog[0];
   const recent = library(plays).slice(0, 6);
 
@@ -69,167 +72,156 @@ export function Home({ onSing, onMine }: { onSing(song: Song): void; onMine(): v
     else if (i.video) onSing({ id: i.video, title: `${i.title} · ${i.artist}` });
   };
 
-  const fromLink = (): Song | null => {
+
+  // one box: a YouTube link sings it, anything else searches the charts
+  const go = () => {
     const id = parseVideoId(link);
-    if (!id) {
-      setMsg({ text: t('home.badLink'), bad: true });
-      return null;
-    }
-    return { id, title: `YouTube · ${id}` };
+    if (id) return onSing({ id, title: `YouTube · ${id}` });
+    setQ(link);
+    document.getElementById('charts')?.scrollIntoView({ behavior: 'smooth' });
   };
 
   return (
-    <div className="page home">
-      {featured ? (
-        <section className="hero-card" style={{ backgroundImage: featured.video ? `url(${maxres(featured.video)})` : undefined }}>
-          <div className="hero-shade" />
-          <div className="hero-body">
-            <div className="chips">
-              <span className="chip-ai">✨ {t('home.ai.badge')}</span>
-              <span className="chip-soft">{t('home.ai.lyrics')}</span>
-              {featured.highest && <span className="chip-soft">{t('home.catalog.highest', { note: featured.highest })}</span>}
-            </div>
-            <h1 className="hero-title">{featured.title}</h1>
-            <p className="hero-artist">{featured.artist}</p>
-            <p className="hero-desc">{t('home.ai.desc')}</p>
-            <div className="row wrap">
-              <button className="btn primary big" onClick={() => onSing({ id: 'cat:' + featured.slug, title: `${featured.title} · ${featured.artist}` })}>
-                🎤 {t('home.sing')}
-              </button>
-              <button className="btn ghost-light" onClick={onMine}>
-                {t('home.mine.title')}
-              </button>
-            </div>
-          </div>
-        </section>
-      ) : (
-        <section className="hero">
-          <h1>{t('home.title')}</h1>
-          <p className="lead">{t('home.lead')}</p>
-        </section>
-      )}
+    <div className="page home v2">
+      <section className="h-hero">
+        <div className="h-neon" aria-hidden="true">
+          UR<span>KTV</span>
+        </div>
+        <p className="h-tag">貼上任何 YouTube MV 就能唱 · 你的電腦即時去人聲 · 原唱灰條和 KTV 歌詞</p>
+        <form
+          className="h-search"
+          onSubmit={(e) => {
+            e.preventDefault();
+            go();
+          }}
+        >
+          <input value={link} onChange={(e) => setLink(e.target.value)} placeholder="貼上 YouTube 連結，或輸入歌名找排行" aria-label={t('home.paste')} />
+          <button className="btn primary big" type="submit">
+            🎤 開唱
+          </button>
+        </form>
+        <div className="h-status">
+          {!ext.present ? (
+            <>
+              <span className="dot off" /> 目前只能唱原唱 MV · <a href="extension.html">裝免費擴充功能，唱伴奏版</a>（電腦 Chrome）
+            </>
+          ) : extOutdated(ext.version) ? (
+            <>
+              <span className="dot warn" /> 擴充功能 v{ext.version} 不是最新（v{EXT_LATEST}）· <a href="extension.html">去更新</a>
+            </>
+          ) : (
+            <>
+              <span className="dot on" /> 伴奏版可用 · {aiSpeed ? `你的電腦 AI ${aiSpeed.toFixed(1)} 倍速${aiSpeed >= 1.15 ? '，AI 伴奏幾秒就開始' : '，AI 伴奏要先等一下（可改快速伴奏）'}` : '第一次唱 AI 伴奏會先測你的電腦速度'}
+            </>
+          )}
+        </div>
+      </section>
+      {msg && <p className={'notice ' + (msg.bad ? 'warn' : 'ok')}>{msg.text}</p>}
 
-      {catalog.length > 1 && (
-        <section>
-          <h2>✨ {t('home.catalog')}</h2>
-          <ul className="tiles">
-            {catalog.map((c) => (
-              <li key={c.slug} className="tile">
-                {c.video ? <img className="thumb" src={thumbUrl(c.video)} alt="" loading="lazy" /> : <div className="thumb thumb-demo">♪</div>}
-                <div className="tile-title">
-                  <strong>{c.title}</strong> · {c.artist}
-                </div>
-                <button className="btn primary small" onClick={() => onSing({ id: 'cat:' + c.slug, title: `${c.title} · ${c.artist}` })}>
-                  {t('home.sing')}
-                </button>
-              </li>
-            ))}
-          </ul>
+      {featured && (
+        <section className="h-feature" style={{ backgroundImage: featured.video ? `url(${maxres(featured.video)})` : undefined }}>
+          <div className="hero-shade" />
+          <div className="h-feature-body">
+            <span className="chip-ai">✨ {t('home.ai.badge')}</span>
+            <h2>
+              {featured.title} <small>{featured.artist}</small>
+            </h2>
+            <p className="muted small">{t('home.ai.desc')}</p>
+            <button className="btn primary" onClick={() => onSing({ id: 'cat:' + featured.slug, title: `${featured.title} · ${featured.artist}` })}>
+              🎤 {t('home.sing')}
+            </button>
+          </div>
         </section>
       )}
 
       {charts && list && (
-        <section className="charts">
+        <section className="charts" id="charts">
           <div className="row between wrap">
             <h2>🔥 {t('home.charts')}</h2>
-            <span className="muted small">
-              {t('home.charts.source', { source: charts.source, date: charts.updated })}
-            </span>
+            <span className="muted small">{t('home.charts.source', { source: charts.source, date: charts.updated })}</span>
           </div>
-          <div className="seg" role="tablist">
-            {charts.lists.map((l) => (
-              <button
-                key={l.key}
-                role="tab"
-                aria-selected={l.key === list.key}
-                className={'seg-btn' + (l.key === list.key ? ' on' : '')}
-                onClick={() => {
-                  setTab(l.key);
-                  setMore(false);
-                }}
-              >
-                {l.label}
-              </button>
-            ))}
+          <div className="row between wrap">
+            <div className="seg" role="tablist">
+              {charts.lists.map((l) => (
+                <button
+                  key={l.key}
+                  role="tab"
+                  aria-selected={l.key === list.key}
+                  className={'seg-btn' + (l.key === list.key ? ' on' : '')}
+                  onClick={() => {
+                    setTab(l.key);
+                    setMore(false);
+                  }}
+                >
+                  {l.label}
+                </button>
+              ))}
+            </div>
+            <input className="chart-filter" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('home.charts.filter')} aria-label={t('home.charts.filter')} />
           </div>
-          <input className="chart-filter" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('home.charts.filter')} aria-label={t('home.charts.filter')} />
-          <ol className="rank-list">
+          <ol className="poster-grid">
             {shown.map((i) => {
               const ready = prepared.has(norm(i.title));
+              const img = i.video ? maxres(i.video) : i.cover;
               return (
-                <li key={i.rank + i.title} className={'rank-row' + (i.rank <= 3 ? ` top top${i.rank}` : '')}>
-                  <span className="rank-no">{i.rank <= 3 ? ['🥇', '🥈', '🥉'][i.rank - 1] : i.rank}</span>
-                  <Move rank={i.rank} last={i.last} />
-                  {i.video ? (
-                    <img className="rank-thumb" src={thumbUrl(i.video)} alt="" loading="lazy" />
-                  ) : i.cover ? (
-                    <img className="rank-thumb" src={i.cover} alt="" loading="lazy" />
-                  ) : (
-                    <div className="rank-thumb thumb-demo">♪</div>
-                  )}
-                  <div className="rank-info">
-                    <div className="rank-title">{i.title}</div>
-                    <div className="rank-artist">{i.artist}</div>
-                  </div>
-                  {ready ? <span className="chip-ai small">✨ {t('home.ai.short')}</span> : i.video ? <span className="chip-soft small">{t('home.charts.mv')}</span> : null}
-                  <div className="rank-actions">
-                    <button className="btn primary small" disabled={!ready && !i.video} onClick={() => singChart(i)}>
-                      {t('home.sing')}
-                    </button>
-                    {i.video && (
-                      <button
-                        className="btn small"
-                        aria-label={t('home.add')}
-                        onClick={() => {
-                          enqueue({ id: i.video, title: `${i.title} · ${i.artist}` });
-                          setMsg({ text: `${t('home.added')}：${i.title}` });
+                <li key={i.rank + i.title} className={'poster' + (i.rank <= 3 && !q ? ` big top${i.rank}` : '')}>
+                  <button className="poster-art" disabled={!ready && !i.video} onClick={() => singChart(i)} aria-label={`${t('home.sing')} ${i.title}`}>
+                    {img ? (
+                      <img
+                        src={img}
+                        alt=""
+                        loading="lazy"
+                        onError={(e) => {
+                          // no YouTube thumbnail: the album cover instead
+                          const el = e.currentTarget;
+                          if (i.cover && el.src !== i.cover) el.src = i.cover;
+                          else el.style.visibility = 'hidden';
                         }}
-                      >
-                        ＋
-                      </button>
+                        onLoad={(e) => {
+                          // YouTube answers a missing thumbnail with a tiny grey placeholder
+                          const el = e.currentTarget;
+                          if (el.naturalWidth > 120) return;
+                          if (i.cover && el.src !== i.cover) el.src = i.cover;
+                          else el.style.visibility = 'hidden';
+                        }}
+                      />
+                    ) : (
+                      <div className="thumb-demo">♪</div>
                     )}
+                    <span className="poster-rank">{i.rank}</span>
+                    <span className="poster-play">🎤</span>
+                    {ready && <span className="chip-ai small poster-ai">✨ AI</span>}
+                  </button>
+                  <div className="poster-info">
+                    <div className="poster-title">{i.title}</div>
+                    <div className="poster-artist">
+                      <Move rank={i.rank} last={i.last} /> {i.artist}
+                    </div>
                   </div>
+                  {i.video && (
+                    <button
+                      className="btn small poster-add"
+                      aria-label={t('home.add')}
+                      title={t('home.add')}
+                      onClick={() => {
+                        enqueue({ id: i.video, title: `${i.title} · ${i.artist}` });
+                        setMsg({ text: `${t('home.added')}：${i.title}` });
+                      }}
+                    >
+                      ＋
+                    </button>
+                  )}
                 </li>
               );
             })}
           </ol>
-          {!q && items.length > 10 && (
+          {!q && items.length > 9 && (
             <button className="btn link" onClick={() => setMore((m) => !m)}>
               {more ? t('home.charts.less') : t('home.charts.more', { n: items.length })}
             </button>
           )}
-          <p className="muted small">{t('home.charts.note')}</p>
         </section>
       )}
-      {msg && <p className={'notice ' + (msg.bad ? 'warn' : 'ok')}>{msg.text}</p>}
-
-      <section className="quick">
-        <button className="quick-card" onClick={onMine}>
-          <span className="quick-icon">🎛️</span>
-          <strong>{t('home.mine.title')}</strong>
-          <span className="muted small">{t('home.mine.desc')}</span>
-        </button>
-        <button className="quick-card" onClick={() => onSing({ id: DEMO_ID, title: t('stage.demoTitle') })}>
-          <span className="quick-icon">🎵</span>
-          <strong>{t('home.demo.title')}</strong>
-          <span className="muted small">{t('home.demo.desc')}</span>
-        </button>
-        <form
-          className="quick-card form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            const s = fromLink();
-            if (s) onSing(s);
-          }}
-        >
-          <span className="quick-icon">🔗</span>
-          <strong>{t('home.paste.title')}</strong>
-          <input value={link} onChange={(e) => setLink(e.target.value)} placeholder={t('home.paste')} aria-label={t('home.paste')} inputMode="url" />
-          <button className="btn small" type="submit">
-            {t('home.sing')}
-          </button>
-        </form>
-      </section>
 
       {recent.length > 0 && (
         <section>
@@ -250,6 +242,19 @@ export function Home({ onSing, onMine }: { onSing(song: Song): void; onMine(): v
           </ul>
         </section>
       )}
+
+      <section className="quick small-quick">
+        <button className="quick-card" onClick={onMine}>
+          <span className="quick-icon">🎛️</span>
+          <strong>{t('home.mine.title')}</strong>
+          <span className="muted small">{t('home.mine.desc')}</span>
+        </button>
+        <button className="quick-card" onClick={() => onSing({ id: DEMO_ID, title: t('stage.demoTitle') })}>
+          <span className="quick-icon">🎵</span>
+          <strong>{t('home.demo.title')}</strong>
+          <span className="muted small">{t('home.demo.desc')}</span>
+        </button>
+      </section>
     </div>
   );
 }
