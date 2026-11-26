@@ -13,6 +13,7 @@ import { fromInt16, getLocal, isLocal } from '../separate/db';
 import { computeHighlights, isCatalog, loadCatalog, type Layered } from '../core/catalog';
 import { LiveNotes } from '../core/liveNotes';
 import { ExtUpdate } from './ExtUpdate';
+import { NewVersion } from './NewVersion';
 import { Prep } from './Prep';
 import { cheer } from './cheers';
 import { playSfx, SFX, type SfxKind } from '../audio/sfx';
@@ -117,6 +118,8 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   // the guide vocal: the original kept faintly under the backing, at the singer's own level
   const [guideLvl, setGuideLvl] = useState(() => Number(localStorage.getItem('urktv.guide')) || 0.25);
   const [hqAsk, setHqAsk] = useState(false);
+  const [laneMsg, setLaneMsg] = useState('');
+  const laneMsgRef = useRef('');
   const [voiceFx, setVoiceFx] = useState(0); // voice changer for the monitor (semitones) // high quality is a second step: it can mean a long wait
   const hqRef = useRef(hq);
   hqRef.current = hq;
@@ -682,6 +685,21 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
 
       if (now - lastHud > 120) {
         lastHud = now;
+        // why the lane is empty, when it is
+        const e = extRef.current;
+        let msg = '';
+        if (!notes || !notes.length) {
+          if (L.chart?.hasPitch) msg = '';
+          else if (!e.present) msg = '灰條要裝免費擴充功能（電腦 Chrome）·  AI 會邊播邊畫出原唱的音';
+          else if (!playing && !liveNotes.current.has()) msg = '按播放後，AI 聽幾秒就會畫出灰條';
+          else if (e.status?.mode === 'classic') msg = '輕量 AI 沒載入：灰條可能不準（看「擴充功能 · 診斷」）';
+          else if (!liveNotes.current.has()) msg = '🎧 AI 正在聽這首歌，灰條馬上出來…';
+          else msg = '🎵 這段沒有人聲（前奏／間奏）';
+        }
+        if (msg !== laneMsgRef.current) {
+          laneMsgRef.current = msg;
+          setLaneMsg(msg);
+        }
         if (mic.current.howl !== howlRef.current) {
           howlRef.current = mic.current.howl;
           setHowl(mic.current.howl);
@@ -915,6 +933,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
         <h1 className="stage-title">{isDemo ? t('stage.demoTitle') : title}</h1>
         <span className={'chip ' + (guide ? 'chip-on' : '')}>{t(guide ? 'stage.mode.guide' : 'stage.mode.free')}</span>
       </header>
+      <NewVersion />
       <ExtUpdate />
 
       <div className="stage-grid">
@@ -1174,6 +1193,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
           )}
           <div className={'lane-wrap' + (guide ? ' dual' : '')}>
             <canvas ref={canvasRef} className="lane" />
+            {laneMsg && <div className="lane-msg">{laneMsg}</div>}
             <div className="pops" aria-live="polite">
               {pops.map((p) => (
                 <div key={p.id} className={'pop pop-' + p.kind}>

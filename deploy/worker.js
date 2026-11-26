@@ -324,15 +324,16 @@ export default {
     let key = decodeURIComponent(url.pathname.replace(/^\/+/, ''));
     if (key === '' || key.endsWith('/')) key += 'index.html';
     if (key === 'robots.txt') return new Response('User-agent: *\nDisallow: /\n', { headers: { 'content-type': 'text/plain' } });
-    let { value, metadata } = await env.SITE.getWithMetadata(key, { type: 'arrayBuffer', cacheTtl: 300 });
+    const ttl = key.startsWith('assets/') || key.startsWith('models/') ? 3600 : 60; // pages and small files: fresh within a minute
+    let { value, metadata } = await env.SITE.getWithMetadata(key, { type: 'arrayBuffer', cacheTtl: ttl });
     if (value === null && !key.includes('.')) {
       key = 'index.html';
-      ({ value, metadata } = await env.SITE.getWithMetadata(key, { type: 'arrayBuffer', cacheTtl: 300 }));
+      ({ value, metadata } = await env.SITE.getWithMetadata(key, { type: 'arrayBuffer', cacheTtl: 60 }));
     }
     if (value === null) return new Response('Not found', { status: 404 });
     const ext = key.split('.').pop().toLowerCase();
     const h = new Headers({ 'content-type': TYPES[ext] || 'application/octet-stream' });
-    h.set('cache-control', key.startsWith('assets/') ? 'private, max-age=31536000, immutable' : 'private, max-age=60');
+    h.set('cache-control', key.startsWith('assets/') ? 'private, max-age=31536000, immutable' : key.startsWith('models/') ? 'private, max-age=86400' : 'no-cache');
     h.set('x-robots-tag', 'noindex, nofollow');
     if (key === 'import.html' || key === 'bench.html') {
       // the import page runs cross-origin isolated (multi-threaded AI)

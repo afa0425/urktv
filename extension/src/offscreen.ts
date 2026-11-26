@@ -119,7 +119,7 @@ function pitchFeed(t: number, voc: Float32Array[], inst?: Float32Array[]) {
       ie += P.ibuf[pos + k] * P.ibuf[pos + k];
     }
     // an intro or interlude: what is in the "vocal" is music that leaked through, not a voice
-    if (inst && ve < 0.18 * ie) {
+    if (inst && ve < 0.08 * ie) {
       midi.push(null);
       continue;
     }

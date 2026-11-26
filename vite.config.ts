@@ -3,6 +3,9 @@ import react from '@vitejs/plugin-react';
 import { readFileSync } from 'node:fs';
 
 const EXT_VERSION = JSON.parse(readFileSync('extension/manifest.json', 'utf8')).version;
+const BUILD = String(Date.now());
+/** dist/build.txt: the running page compares it with its own build to offer the new version. */
+const buildFile = (): Plugin => ({ name: 'build-id', generateBundle() { this.emitFile({ type: 'asset', fileName: 'build.txt', source: BUILD }); } });
 
 // The import page needs cross-origin isolation so the AI model can use several CPU threads
 // (SharedArrayBuffer). Only that page gets it: isolation would block the YouTube player elsewhere.
@@ -28,8 +31,8 @@ const isolateImportPage = (): Plugin => {
 // base './' so the built site works from any path (GitHub Pages, Cloudflare Pages, a subfolder…)
 export default defineConfig({
   base: './',
-  define: { __EXT_VERSION__: JSON.stringify(EXT_VERSION) },
-  plugins: [react(), isolateImportPage()],
+  define: { __EXT_VERSION__: JSON.stringify(EXT_VERSION), __BUILD__: JSON.stringify(BUILD) },
+  plugins: [react(), isolateImportPage(), buildFile()],
   optimizeDeps: { exclude: ['onnxruntime-web'] },
   worker: { format: 'es' },
   build: {

@@ -8,6 +8,7 @@ import { Home } from './ui/Home';
 import { MineView } from './ui/Mine';
 import { newRoomCode, RoomPage } from './ui/Room';
 import { ExtUpdate } from './ui/ExtUpdate';
+import { NewVersion } from './ui/NewVersion';
 import { EXT_LATEST, extOutdated, useExtension } from './core/extension';
 
 type Tab = 'home' | 'mine' | 'queue' | 'history' | 'settings';
@@ -107,6 +108,7 @@ export function App() {
         </nav>
       </header>
       <main>
+        <NewVersion />
         <ExtUpdate />
         {view.name === 'home' && (
           <Home
