@@ -1,3 +1,20 @@
+# 歌曲匯入（跟 KAREOKIE 一樣的做法）
+
+**匯入在匯入者自己的電腦上跑，只上傳灰條和歌詞時間；伴奏、人聲永遠留在那台電腦。**
+工具不負責下載歌，請用你有權使用的音檔。
+
+## 一鍵匯入（Windows＋NVIDIA 顯示卡）
+
+```powershell
+powershell -ExecutionPolicy Bypass -File pipeline\setup_windows.ps1 -Work D:\urktv-work   # 第一次：裝環境、下載模型（尚未在真機測試）
+$env:URKTV_PASS = "<網站密碼>"
+D:\urktv-work\venv\Scripts\python.exe pipeline\import_song.py 晴天.mp3 --title 晴天 --artist 周杰倫 --video DYptgVvkVLQ --work D:\urktv-work --site https://urktv.afa0425.workers.dev --i-have-rights
+```
+
+`import_song.py` 依序：六層拆解 → 從 LRCLIB 找同步歌詞並對齊 → 畫報告 `report.png` → 上傳灰條（`upload.py`）。
+
+---
+
 # 歌曲極致拆解流程
 
 一首歌進來，六層處理，輸出伴奏、主唱、和聲、乾淨主唱，以及評分用的灰條和唱法分析（`song.json`）。
