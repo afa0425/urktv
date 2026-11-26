@@ -69,6 +69,19 @@ interface ResultProps {
   onHome(): void;
 }
 
+/** A title for this score: about your own singing, never a made-up comparison with others. */
+function stageName(score: number): { icon: string; name: string; line: string } {
+  const tiers = [
+    { min: 95, icon: '👑', name: '天籟級', lines: ['這首被你唱成自己的歌了', '原唱聽到都要緊張', '整首穩到發光'] },
+    { min: 88, icon: '💎', name: '麥霸認證', lines: ['KTV 包廂裡最想聽你唱', '這水準可以開演唱會了', '一開口全場安靜'] },
+    { min: 78, icon: '🌟', name: '實力派', lines: ['音準和感情都在線', '再唱一次就要破紀錄了', '這首你很有一套'] },
+    { min: 65, icon: '🎤', name: '潛力新星', lines: ['越唱越順了', '高音再放開一點就更猛', '這首很適合你的聲音'] },
+    { min: 0, icon: '🌱', name: '暖身完成', lines: ['熟悉旋律了，下一遍會更好', '先跟著原唱多唱幾次', '勇敢開口就是第一步'] },
+  ];
+  const t = tiers.find((x) => score >= x.min)!;
+  return { icon: t.icon, name: t.name, line: t.lines[Math.floor(Math.random() * t.lines.length)] };
+}
+
 export function Result({ song, result, prevBest, next, onAgain, onNext, onHome }: ResultProps) {
   const t = useT();
   const none = result.voicedSec < 2;
@@ -86,8 +99,24 @@ export function Result({ song, result, prevBest, next, onAgain, onNext, onHome }
             <span className="grade">{result.grade}</span>
             <span className="score-num huge">{score}</span>
           </div>
+          {(() => {
+            const sn = stageName(score);
+            return (
+              <div className="stage-name">
+                <span className="sn-icon">{sn.icon}</span>
+                <strong>{sn.name}</strong>
+                <span className="muted">{sn.line}</span>
+              </div>
+            );
+          })()}
           <p className={isBest ? 'best new' : 'best'}>
-            {isBest ? t('result.newBest') : t('result.best', { n: Math.round(prevBest!) })}
+            {isBest
+              ? prevBest === null
+                ? '🎉 第一次唱這首就拿到 ' + score + ' 分！'
+                : `🎉 刷新你的紀錄！比上次最佳多 ${Math.max(1, Math.round(result.score - prevBest))} 分`
+              : result.score >= prevBest! - 3
+                ? `🔥 離你的最佳 ${Math.round(prevBest!)} 分只差一點點`
+                : t('result.best', { n: Math.round(prevBest!) })}
           </p>
           {result.extras && (
             <div className="card highlights">

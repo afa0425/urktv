@@ -14,6 +14,7 @@ import { computeHighlights, isCatalog, loadCatalog, type Layered } from '../core
 import { LiveNotes } from '../core/liveNotes';
 import { ExtUpdate } from './ExtUpdate';
 import { Prep } from './Prep';
+import { cheer } from './cheers';
 import { findLyrics } from '../core/lyricsSearch';
 import { drawDualLane, meanOffset, type DualState } from './dualLane';
 import { useT, type I18nKey } from '../i18n';
@@ -29,8 +30,6 @@ interface Props {
 /** Version of the lyrics search; lyrics saved by an older one are looked up again. */
 const LYRICS_V = 2;
 
-const PRAISE = ['好穩！', '太強了！', '停不下來！', '神準！', '這就是實力！', '全場安靜聽你唱！', '專業級！'];
-const LINE_PRAISE = ['這句好聽！', '有味道！', '好穩！', '像原唱一樣！', '這句可以收錄了！'];
 
 /** About how long a lyric line takes to sing (web lyrics only give when it starts). */
 const sungDur = (text: string) => Math.max(1, text.replace(/\s/g, '').length * 0.33 + 0.4);
@@ -100,7 +99,6 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
     }
   }, [isDemo, own, local, saved?.raw, saved?.kind]);
   const guide = !!chart?.hasPitch;
-  const transpose = own ? key : saved?.transpose ?? 0;
   // a catalog song without hosted audio plays its YouTube MV (with the original vocal), like KAREOKIE's web
   const hasAudio = !!local && local.inst.length > 0;
   const ytCat = own && !!local && !hasAudio && !!local.video;
@@ -110,13 +108,19 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   // come from the separated vocal); without it, the plain MV
   const [wantBacking] = useState(true);
   // AI backing (clean, may need a head start) or fast backing (classic cut: starts at once, duller)
-  const [bmode, setBmode] = useState<'orig' | 'fast' | 'ai'>('orig');
-  const bmodeRef = useRef(bmode);
-  bmodeRef.current = bmode;
+  // high-quality AI for the backing (a second step: it can mean a long wait); else the light AI
+  const [hq, setHq] = useState(false);
+  // the guide vocal: the original kept faintly under the backing, at the singer's own level
+  const [guideLvl, setGuideLvl] = useState(() => Number(localStorage.getItem('urktv.guide')) || 0.25);
+  const [hqAsk, setHqAsk] = useState(false); // high quality is a second step: it can mean a long wait
+  const hqRef = useRef(hq);
+  hqRef.current = hq;
   // any YouTube song can get the live backing track: library songs, and links pasted on Home
   const ytPlain = !own && !isDemo;
   const ytAny = ytCat || ytPlain;
   const backing = ytAny && ext.present && wantBacking;
+  // with the extension the backing changes key too; own songs re-pitch their tracks
+  const transpose = own || (ytAny && ext.present) ? key : saved?.transpose ?? 0;
   // installing the extension is the consent; the extension still keeps the flag
   useEffect(() => {
     if (ext.present && !ext.consent) extPost({ type: 'consent', ok: true });
@@ -406,6 +410,13 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
     }
   };
 
+  /** Key change on a YouTube song: the extension re-pitches the backing; bars and scoring follow. */
+  const changeLiveKey = (k: number) => {
+    k = Math.max(-6, Math.min(6, k));
+    setKey(k);
+    extPost({ type: 'key', semitones: k });
+  };
+
   const exportChart = () => {
     if (!local) return;
     const blob = new Blob([toUltraStar(local.title, local.notes)], { type: 'text/plain' });
@@ -538,17 +549,17 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
                 c.highHit.add(i);
                 if (now - c.lastHigh > 2500) {
                   c.lastHigh = now;
-                  pop('🔥 高音達成！', 'gold');
+                  pop(cheer('high'), 'gold');
                 }
               }
-              if ([5, 10, 20, 30, 50, 80, 120].includes(c.combo)) pop(`連擊 ×${c.combo}！${PRAISE[c.combo % PRAISE.length]}`, 'combo');
+              if ([5, 10, 20, 30, 50, 80, 120].includes(c.combo)) pop(cheer('combo', c.combo), 'combo');
             } else {
               c.combo = 0;
               const off = meanOffset(trace.current, n, L.transpose);
               // only clear misses, and rarely: hints should help, not nag
               if (off !== null && Math.abs(off) > 0.9 && now - c.lastHint > 10000) {
                 c.lastHint = now;
-                pop(off > 0 ? '再低一點點就完美了' : '再高一點點就完美了', 'hint');
+                pop(cheer(off > 0 ? 'lower' : 'higher'), 'hint');
               }
             }
             // a line just ended: praise it if it went well
@@ -558,7 +569,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
               c.lines.set(n.line, lr);
               if (lr >= 0.8 && now - c.lastPraise > 3000) {
                 c.lastPraise = now;
-                pop(LINE_PRAISE[(n.line + c.max) % LINE_PRAISE.length], 'praise');
+                pop(cheer('line'), 'praise');
               }
             }
           }
@@ -594,12 +605,12 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
             const high = (J.mids.get(-1) ?? 0) && n.midi >= (J.mids.get(-1) ?? 999);
             if (high && now - c.lastHigh > 2500) {
               c.lastHigh = now;
-              pop('🔥 高音達成！', 'gold');
-            } else if ([5, 10, 20, 30, 50, 80, 120].includes(c.combo)) pop(`連擊 ×${c.combo}！${PRAISE[c.combo % PRAISE.length]}`, 'combo');
+              pop(cheer('high'), 'gold');
+            } else if ([5, 10, 20, 30, 50, 80, 120].includes(c.combo)) pop(cheer('combo', c.combo), 'combo');
             else if (J.run >= 4 && now - c.lastPraise > 4000) {
               c.lastPraise = now;
               J.run = 0;
-              pop(LINE_PRAISE[(c.max + c.combo) % LINE_PRAISE.length], 'praise');
+              pop(cheer('line'), 'praise');
             }
           } else {
             c.combo = 0;
@@ -607,7 +618,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
             const off = tot >= 5 ? meanOffset(trace.current, n, L.transpose) : null;
             if (off !== null && Math.abs(off) > 0.9 && now - c.lastHint > 10000) {
               c.lastHint = now;
-              pop(off > 0 ? '再低一點點就完美了' : '再高一點點就完美了', 'hint');
+              pop(cheer(off > 0 ? 'lower' : 'higher'), 'hint');
             }
           }
         }
@@ -671,7 +682,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
     return Number(localStorage.getItem('urktv.aiSpeed')) || 0;
   };
   /** What the extension should run: the high-quality AI, or the light AI (original and fast backing). */
-  const engineMode = () => (bmodeRef.current === 'ai' && !extRef.current.fellBack ? 'ai' : 'lite');
+  const engineMode = () => (hqRef.current && !extRef.current.fellBack ? 'ai' : 'lite');
   const startMsg = () => {
     const md = MODELS.kara2;
     return { type: 'start', lead: LEAD, vocal: vocalRef.current, mode: engineMode(), modelUrl: MODEL_BASE + md.file, ortBase: ORT_BASE, model: 'kara2', liteBase: MODEL_BASE };
@@ -689,23 +700,23 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   /** Seconds of AI backing to have ready so it lasts `left` seconds of song at speed sp. */
   const aiNeed = (sp: number, left: number) => (sp >= 1.15 ? 8 : Math.min(600, left * (1 / sp - 1) + 8));
 
-  /**
-   * The singer picks: original / fast backing (light AI) / AI backing, all made on their own computer.
-   * Original and fast run the same light AI, so switching between them only changes the vocal level.
-   */
-  const pickMode = (m: 'orig' | 'fast' | 'ai') => {
-    if (!backing) return; // no extension: the plain MV
+  /** Original 100 % / guide (the original faintly) / backing 0 %: only the vocal level changes. */
+  const vocalPreset = (v: number) => {
+    if (!backing) return;
+    changeVocal(v);
+  };
+  /** High quality on or off: the extension switches models; the picture waits for the new one. */
+  const setQuality = (on: boolean) => {
+    if (!backing) return;
     const before = engineMode();
-    if (m === 'ai') extRef.current.fellBack = false;
-    bmodeRef.current = m;
-    setBmode(m);
-    changeVocal(m === 'orig' ? 1 : 0);
+    if (on) extRef.current.fellBack = false;
+    hqRef.current = on;
+    setHq(on);
     const after = engineMode();
     if (phase !== 'live' || before === after) return;
     extPost({ ...startMsg(), type: 'setmode' });
     const tr = transport.current;
     if (tr instanceof DualTransport && tr.started) {
-      // the new model starts where the picture is now: the picture waits for it
       rebuffering.current = true;
       tr.main.pause();
       tr.seek(tr.time(), true);
@@ -851,7 +862,12 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   };
 
   return (
-    <div className="stage">
+    <div className="stage neon">
+      <div className="beams" aria-hidden="true">
+        <i />
+        <i />
+        <i />
+      </div>
       <header className="stage-top">
         <button className="btn ghost" onClick={onExit}>
           ← {t('stage.back')}
@@ -872,16 +888,16 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
               <Prep
                 pct={prep.pct}
                 label={prep.label}
-                sub={bmode === 'ai' && aiSpeed() > 0 && aiSpeed() < 1.15 ? `你的電腦算高品質 AI 是 ${aiSpeed().toFixed(1)} 倍速，所以要先多算一段` : undefined}
-                onFast={bmode === 'ai' ? () => pickMode('fast') : undefined}
+                sub={hq && aiSpeed() > 0 && aiSpeed() < 1.15 ? `你的電腦算高品質 AI 是 ${aiSpeed().toFixed(1)} 倍速，所以要先多算一段` : undefined}
+                onFast={hq ? () => setQuality(false) : undefined}
               />
             )}
             {phase === 'live' && backing && !prep && hold !== null && (
               <Prep
                 pct={hold}
-                label={bmode === 'ai' && !extRef.current.fellBack ? '高品質伴奏跟上中' : '伴奏跟上中'}
-                sub={bmode === 'ai' && aiSpeed() > 0 && aiSpeed() < 1.15 ? `你的電腦算高品質 AI 是 ${aiSpeed().toFixed(1)} 倍速，比歌慢` : undefined}
-                onFast={bmode === 'ai' ? () => pickMode('fast') : undefined}
+                label={hq && !extRef.current.fellBack ? '高品質伴奏跟上中' : '伴奏跟上中'}
+                sub={hq && aiSpeed() > 0 && aiSpeed() < 1.15 ? `你的電腦算高品質 AI 是 ${aiSpeed().toFixed(1)} 倍速，比歌慢` : undefined}
+                onFast={hq ? () => setQuality(false) : undefined}
               />
             )}
             {localErr && <div className="overlay error">{t('mine.missing')}</div>}
@@ -962,37 +978,97 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
           )}
           {ytAny && !backingFailed && (
             <div className="sing-mode">
-              <div className="seg big" role="radiogroup" aria-label="原唱或伴奏">
-                {(['orig', 'fast', 'ai'] as const).map((m) => {
-                  const on = backing ? bmode === m : m === 'orig';
+              <div className="seg big" role="radiogroup" aria-label="原唱、導唱或伴唱">
+                {(
+                  [
+                    ['🎤 原唱', 1],
+                    ['🎙️ 導唱', guideLvl],
+                    ['🎶 伴唱', 0],
+                  ] as const
+                ).map(([label, v]) => {
+                  const on = backing ? Math.abs(vocal - v) < 0.01 : v === 1;
                   return (
-                    <button key={m} role="radio" aria-checked={on} disabled={m !== 'orig' && !ext.present} className={'seg-btn' + (on ? ' on' : '')} onClick={() => pickMode(m)}>
-                      {m === 'orig' ? '🎤 原唱' : m === 'fast' ? '⚡ 伴奏' : '✨ 高品質伴奏'}
+                    <button key={label} role="radio" aria-checked={on} disabled={v !== 1 && !ext.present} className={'seg-btn' + (on ? ' on' : '')} onClick={() => vocalPreset(v)}>
+                      {label}
                     </button>
                   );
                 })}
               </div>
-              <p className="muted small sing-mode-note">
-                {!ext.present ? (
-                  <>
-                    伴奏要裝免費擴充功能（電腦 Chrome）·{' '}
-                    <a href="extension.html" target="_blank" rel="noopener">
-                      一分鐘裝好
-                    </a>
-                  </>
-                ) : bmode === 'orig' ? (
-                  '原唱 · 灰條和歌詞由你的電腦即時分析'
-                ) : bmode === 'fast' ? (
-                  '輕量 AI 即時去人聲：一般電腦就能跑，幾秒就開始'
-                ) : (
-                  (() => {
-                    const sp = aiSpeed();
-                    if (!sp) return '高品質 AI 去人聲：最乾淨，需要好一點的顯示卡（第一次會先測速）';
-                    const w = Math.round(aiNeed(sp, hud.dur || 240));
-                    return `高品質 AI 去人聲：最乾淨 · 你的電腦 ${sp.toFixed(1)} 倍速` + (sp >= 1.15 ? '，幾秒就開始' : `，開始前要先等約 ${w} 秒`);
-                  })()
-                )}
+              {backing && (
+                <label className="vocal-slider" title="原唱人聲大小：拉到你喜歡的導唱程度">
+                  <span>人聲 {Math.round(vocal * 100)}%</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={vocal}
+                    style={{ ['--p' as string]: `${vocal * 100}%` } as React.CSSProperties}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      changeVocal(v);
+                      // a level between the ends becomes this singer's guide level
+                      if (v > 0.02 && v < 0.98) {
+                        setGuideLvl(v);
+                        localStorage.setItem('urktv.guide', String(v));
+                      }
+                    }}
+                  />
+                </label>
+              )}
+              {backing && (
+                <div className="seg small-seg" role="radiogroup" aria-label="去人聲品質">
+                  <button role="radio" aria-checked={!hq} className={'seg-btn' + (!hq ? ' on' : '')} onClick={() => (setHqAsk(false), setQuality(false))}>
+                    一般
+                  </button>
+                  <button role="radio" aria-checked={hq} className={'seg-btn' + (hq ? ' on' : '')} onClick={() => !hq && setHqAsk(true)}>
+                    ✨ 高品質
+                  </button>
+                </div>
+              )}
+              {backing && (
+                <div className="key-ctl" title="升降 Key：伴奏、導唱、灰條一起移">
+                  <button className="btn icon" onClick={() => changeLiveKey(key - 1)} disabled={key <= -6} aria-label="降 Key">
+                    ♭
+                  </button>
+                  <span>Key {key > 0 ? '+' : ''}{key}</span>
+                  <button className="btn icon" onClick={() => changeLiveKey(key + 1)} disabled={key >= 6} aria-label="升 Key">
+                    ♯
+                  </button>
+                </div>
+              )}
+              {!ext.present && (
+                <p className="muted small sing-mode-note">
+                  導唱、伴唱、升降 Key 要裝免費擴充功能（電腦 Chrome）·{' '}
+                  <a href="extension.html" target="_blank" rel="noopener">
+                    一分鐘裝好
+                  </a>
+                </p>
+              )}
+            </div>
+          )}
+          {hqAsk && (
+            <div className="hq-ask">
+              <strong>✨ 高品質伴奏</strong>
+              <p className="small">
+                {(() => {
+                  const sp = aiSpeed();
+                  if (!sp) return '最乾淨的去人聲，但很吃顯示卡。這台電腦還沒測過：有獨立顯示卡幾秒就好，內建顯示卡可能要先等一兩分鐘。';
+                  if (sp >= 1.15) return `你的電腦算得夠快（${sp.toFixed(1)} 倍速），幾秒就能開始。`;
+                  return `你的電腦算這個是 ${sp.toFixed(1)} 倍速，比歌慢：開始前要先等約 ${Math.round(aiNeed(sp, hud.dur || 240))} 秒，中間可能還會停下來等。`;
+                })()}
               </p>
+              <div className="row wrap">
+                <button className="btn primary small" onClick={() => (setHqAsk(false), setQuality(true))}>
+                  確定用高品質
+                </button>
+                <button className="btn small" onClick={() => setHqAsk(false)}>
+                  先不要，用一般伴奏
+                </button>
+                <a className="small" href="bench.html" target="_blank" rel="noopener">
+                  測我的電腦
+                </a>
+              </div>
             </div>
           )}
           <div className={'lane-wrap' + (guide ? ' dual' : '')}>
@@ -1006,7 +1082,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
             </div>
           </div>
           {micErr && <p className="notice warn">{t(micErr)}</p>}
-          {!guide && <p className="notice">{t('stage.mode.free.hint')}</p>}
+          {!guide && !liveNotes.current.has() && <p className="notice">{t('stage.mode.free.hint')}</p>}
         </section>
 
         <aside className="stage-side">

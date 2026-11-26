@@ -9,8 +9,29 @@ const RATE = 44100;
 const ctx = new AudioContext({ sampleRate: RATE, latencyHint: 'interactive' });
 const instGain = ctx.createGain();
 const vocGain = ctx.createGain();
-instGain.connect(ctx.destination);
-vocGain.connect(ctx.destination);
+// backing and guide vocal go through the key shifter (when it has loaded) to the speakers
+const mix = ctx.createGain();
+mix.connect(ctx.destination);
+instGain.connect(mix);
+vocGain.connect(mix);
+let shifter: AudioWorkletNode | null = null;
+let wantKey = 0;
+ctx.audioWorklet
+  .addModule(chrome.runtime.getURL('pitch-worklet.js'))
+  .then(() => {
+    shifter = new AudioWorkletNode(ctx, 'key-shift', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] });
+    mix.disconnect();
+    mix.connect(shifter);
+    shifter.connect(ctx.destination);
+    setKey(wantKey);
+  })
+  .catch(() => {
+    /* no key change, the rest works */
+  });
+function setKey(semitones: number) {
+  wantKey = semitones;
+  shifter?.parameters.get('ratio')!.setValueAtTime(Math.pow(2, semitones / 12), ctx.currentTime);
+}
 vocGain.gain.value = 0;
 
 type Seg = { t: number; inst: Float32Array[]; voc: Float32Array[]; src?: AudioBufferSourceNode[] };
@@ -632,7 +653,7 @@ function startLite(base: string) {
 let lostAt = 0;
 chrome.runtime.onMessage.addListener((m: any, _s: unknown, reply: (x: unknown) => void) => {
   if (m?.to === 'engine-diag') {
-    reply({ blocks: S.blocks, lastTap: S.lastTap, busy: S.busy, using: S.using, running: S.running, len: S.len, done: S.done, segs: S.segs.length, clock: S.clock, up: performance.now() / 1000 });
+    reply({ shifter: !!shifter, key: wantKey, blocks: S.blocks, lastTap: S.lastTap, busy: S.busy, using: S.using, running: S.running, len: S.len, done: S.done, segs: S.segs.length, clock: S.clock, up: performance.now() / 1000 });
     return;
   }
   if (m?.to !== 'engine') return;
@@ -724,6 +745,8 @@ chrome.runtime.onMessage.addListener((m: any, _s: unknown, reply: (x: unknown) =
           .catch((e) => toPage({ type: 'status', state: 'fallback', mode: 'classic', message: String(e?.message ?? e) }));
       }
     }
+  } else if ((msg as any).type === 'key') {
+    setKey((msg as any).semitones);
   } else if (msg.type === 'vocal') {
     vocGain.gain.setTargetAtTime(msg.level, ctx.currentTime, 0.03);
   } else if (msg.type === 'stop') {

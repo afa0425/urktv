@@ -4,6 +4,7 @@ import type { Note } from '../core/chart';
 import { midiName } from '../audio/pitch';
 import { foldDiff } from '../core/score';
 import type { TracePoint } from './lane';
+import { countdownWord, goWord } from './cheers';
 
 export interface DualState {
   center: number;
@@ -331,7 +332,8 @@ export function drawDualLane(ctx: CanvasRenderingContext2D, w: number, h: number
     ctx.textAlign = 'center';
     ctx.fillStyle = C.flame;
     ctx.font = 'bold 15px system-ui, sans-serif';
-    ctx.fillText(dt2 > 0 ? `🔥 高音來了 ${Math.ceil(dt2)}` : `🔥 ${hl.peak} 衝！`, hx, 14);
+    const k = Math.round(hl.start * 10);
+    ctx.fillText(dt2 > 0 ? `${countdownWord(k)} ${Math.ceil(dt2)}` : `${hl.peak} ${goWord(k)}`, hx, 14);
     ctx.textAlign = 'left';
   }
 
