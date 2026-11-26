@@ -81,6 +81,9 @@ export interface SavedChart {
   offsetMs: number;
   /** Key change in semitones for the target melody. */
   transpose: number;
+  /** Found automatically on the web (version of the search that found it), and what it was. */
+  auto?: number;
+  name?: string;
 }
 
 export const settings = persisted<Settings>('hs.settings', {

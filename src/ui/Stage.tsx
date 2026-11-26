@@ -14,6 +14,7 @@ import { computeHighlights, isCatalog, loadCatalog, type Layered } from '../core
 import { LiveNotes } from '../core/liveNotes';
 import { ExtUpdate } from './ExtUpdate';
 import { Prep } from './Prep';
+import { findLyrics } from '../core/lyricsSearch';
 import { drawDualLane, meanOffset, type DualState } from './dualLane';
 import { useT, type I18nKey } from '../i18n';
 import { drawLane, nearestNote, type LaneState, type TracePoint } from './lane';
@@ -25,34 +26,14 @@ interface Props {
   onDone(result: ScoreResult, song: Song): void;
 }
 
+/** Version of the lyrics search; lyrics saved by an older one are looked up again. */
+const LYRICS_V = 2;
+
 const PRAISE = ['好穩！', '太強了！', '停不下來！', '神準！', '這就是實力！', '全場安靜聽你唱！', '專業級！'];
 const LINE_PRAISE = ['這句好聽！', '有味道！', '好穩！', '像原唱一樣！', '這句可以收錄了！'];
 
-/** Synced lyrics for a YouTube title from LRCLIB (free, public). Line timing only. */
 /** About how long a lyric line takes to sing (web lyrics only give when it starts). */
 const sungDur = (text: string) => Math.max(1, text.replace(/\s/g, '').length * 0.33 + 0.4);
-
-async function findLyrics(videoTitle: string): Promise<{ lrc: string; name: string } | null> {
-  const inner = /[【「《\[](.+?)[】」》\]]/.exec(videoTitle)?.[1];
-  const clean = videoTitle
-    .replace(/[【「《\[(（].*?(official|mv|m\/v|music video|lyric|歌詞|動態|官方|完整版|高音質|ktv|伴奏|karaoke|4k|hd).*?[】」》\])）]/gi, ' ')
-    .replace(/official\s*(music\s*)?video|music video|lyrics? video|\bmv\b|\bm\/v\b|官方|完整版|動態歌詞|歌詞版?|高音質/gi, ' ')
-    .replace(/[|｜]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  const queries = [...new Set([clean, inner && `${clean.split(/[-–—]/)[0]} ${inner}`, inner].filter(Boolean) as string[])];
-  for (const q of queries) {
-    try {
-      const r = await fetch('https://lrclib.net/api/search?q=' + encodeURIComponent(q));
-      if (!r.ok) continue;
-      const list = ((await r.json()) as any[]).filter((x) => x.syncedLyrics);
-      if (list.length) return { lrc: list[0].syncedLyrics, name: `${list[0].artistName} – ${list[0].trackName}` };
-    } catch {
-      /* offline or blocked */
-    }
-  }
-  return null;
-}
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
@@ -144,19 +125,29 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   const [drag, setDrag] = useState<number | null>(null);
   const [lyricsNote, setLyricsNote] = useState('');
   const triedLyrics = useRef('');
+  // lyrics found by an older search (it could pick another song from the same drama): look again
+  const staleAuto = saved?.kind === 'lrc' && saved.auto !== LYRICS_V && saved.offsetMs === 0 && !saved.name?.startsWith('manual');
   useEffect(() => {
-    if (!ytPlain || saved || !title || title.startsWith('YouTube · ') || triedLyrics.current === title) return;
+    if (!ytPlain || (saved && !staleAuto) || !title || title.startsWith('YouTube · ') || triedLyrics.current === title) return;
     triedLyrics.current = title;
     let off = false;
-    findLyrics(title).then((hit) => {
-      if (off) return;
-      if (!hit) return setLyricsNote(t('stage.lyricsNone'));
-      charts.set((c) => (c[song.id] ? c : { ...c, [song.id]: { raw: hit.lrc, kind: 'lrc', offsetMs: 0, transpose: 0 } }));
-      setLyricsNote(t('stage.lyricsFound', { name: hit.name }));
-    });
+    const go = () =>
+      findLyrics(title, transport.current?.duration() || 0).then((hit) => {
+        if (off) return;
+        if (!hit) {
+          if (staleAuto) removeChart();
+          return setLyricsNote(t('stage.lyricsNone'));
+        }
+        charts.set((c) => ({ ...c, [song.id]: { raw: hit.lrc, kind: 'lrc', offsetMs: 0, transpose: 0, auto: LYRICS_V, name: hit.name } }));
+        setLyricsNote(hit.name);
+      });
+    // the video's length helps pick the right version: give the player a moment to know it
+    const id = window.setTimeout(go, transport.current?.duration() ? 0 : 1500);
     return () => {
       off = true;
+      window.clearTimeout(id);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ytPlain, saved, title, song.id]);
   const [diagCopied, setDiagCopied] = useState(false);
   // getting the backing ready: progress 0-100, or null while the model loads
@@ -721,7 +712,10 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
       );
       setPrep({ pct: null, label: '載入 AI 模型' });
       const cd = window.setInterval(() => {
-        if (started) return window.clearInterval(cd);
+        if (started || tr.started) {
+          setPrep(null);
+          return window.clearInterval(cd);
+        }
         const st = extRef.current.status;
         if (!st || st.state === 'loading' || (engineMode() === 'lite' && st.mode !== 'lite' && !extRef.current.fellBack)) {
           setPrep({ pct: null, label: '載入 AI 模型（第一次要下載，之後很快）' });
@@ -964,21 +958,6 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
               </p>
             </div>
           )}
-          {lyricsNote && <p className="muted small lyric-src">{lyricsNote}</p>}
-          {saved?.kind === 'lrc' && phase === 'live' && (
-            <div className="lyric-nudge">
-              <button className="btn small" onClick={() => ((manualLyrics.current = true), patchChart({ offsetMs: (saved.offsetMs ?? 0) - 500 }))}>
-                {t('stage.lyricsEarlier')}
-              </button>
-              <button className="btn small primary" onClick={alignLyrics}>
-                {t('stage.lyricsTap')}
-              </button>
-              <span className="muted small">{((saved.offsetMs ?? 0) / 1000).toFixed(1)} s</span>
-              <button className="btn small" onClick={() => ((manualLyrics.current = true), patchChart({ offsetMs: (saved.offsetMs ?? 0) + 500 }))}>
-                {t('stage.lyricsLater')}
-              </button>
-            </div>
-          )}
           <div className={'lane-wrap' + (guide ? ' dual' : '')}>
             <canvas ref={canvasRef} className="lane" />
             <div className="pops" aria-live="polite">
@@ -1023,6 +1002,40 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
                 {t('stage.restart')}
               </button>
               {nextTitle && <p className="muted small">{t('queue.next', { title: nextTitle })}</p>}
+            </div>
+          )}
+
+          {ytPlain && (saved?.kind === 'lrc' || lyricsNote) && (
+            <div className="card col lyric-card">
+              <div className="label">歌詞</div>
+              <small className="muted">{saved?.name ?? lyricsNote}</small>
+              {saved?.kind === 'lrc' && (
+                <>
+                  <div className="row wrap lyric-tools">
+                    <button className="btn small" onClick={() => ((manualLyrics.current = true), patchChart({ offsetMs: (saved.offsetMs ?? 0) - 500 }))}>
+                      ⏪ 早一點
+                    </button>
+                    <span className="muted small">{((saved.offsetMs ?? 0) / 1000).toFixed(1)}s</span>
+                    <button className="btn small" onClick={() => ((manualLyrics.current = true), patchChart({ offsetMs: (saved.offsetMs ?? 0) + 500 }))}>
+                      晚一點 ⏩
+                    </button>
+                  </div>
+                  {phase === 'live' && (
+                    <button className="btn small primary" onClick={alignLyrics}>
+                      {t('stage.lyricsTap')}
+                    </button>
+                  )}
+                  <button
+                    className="btn link small"
+                    onClick={() => {
+                      removeChart();
+                      setLyricsNote('已拿掉。可在「更多設定」匯入自己的歌詞檔（.lrc）');
+                    }}
+                  >
+                    不是這首歌？拿掉歌詞
+                  </button>
+                </>
+              )}
             </div>
           )}
 
