@@ -4,7 +4,7 @@ The audio (backing track, vocals) stays on this computer.
 
 usage: python pipeline/upload.py OUT_DIR --slug qingtian --title 晴天 --artist 周杰倫 --video DYptgVvkVLQ \
            --site https://urktv.afa0425.workers.dev --i-have-rights
-       password: URKTV_PASS environment variable (user urktv, or URKTV_USER)
+       upload key: URKTV_UPLOAD_KEY environment variable (site password, if any: URKTV_PASS)
 """
 import argparse
 import base64
@@ -38,6 +38,8 @@ def main() -> None:
     body = json.dumps(pkg, ensure_ascii=False, separators=(',', ':')).encode()
     req = urllib.request.Request(a.site.rstrip('/') + '/api/songs', data=body, method='POST',
                                  headers={'content-type': 'application/json', 'user-agent': 'urktv-uploader/1.0'})
+    if os.environ.get('URKTV_UPLOAD_KEY'):
+        req.add_header('x-upload-key', os.environ['URKTV_UPLOAD_KEY'])
     pw = os.environ.get('URKTV_PASS')
     if pw:
         tok = base64.b64encode(f"{os.environ.get('URKTV_USER', 'urktv')}:{pw}".encode()).decode()

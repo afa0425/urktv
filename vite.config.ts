@@ -7,7 +7,7 @@ import react from '@vitejs/plugin-react';
 const isolateImportPage = (): Plugin => {
   const add = (req: { url?: string }, res: { setHeader(k: string, v: string): void }) => {
     const url = req.url ?? '';
-    if (url.startsWith('/import.html')) {
+    if (url.startsWith('/import.html') || url.startsWith('/bench.html')) {
       res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
       res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
     } else if (!url.endsWith('.html') && url !== '/' && !url.startsWith('/?')) {
@@ -29,6 +29,6 @@ export default defineConfig({
   optimizeDeps: { exclude: ['onnxruntime-web'] },
   worker: { format: 'es' },
   build: {
-    rollupOptions: { input: { main: 'index.html', import: 'import.html' } },
+    rollupOptions: { input: { main: 'index.html', import: 'import.html', bench: 'bench.html' } },
   },
 });

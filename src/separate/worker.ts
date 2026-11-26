@@ -29,7 +29,30 @@ async function fetchModel(url: string): Promise<ArrayBuffer> {
   } catch {
     cache = null; // no cache storage (private mode): just download
   }
-  const res = await fetch(url);
+  let res = await fetch(url);
+  if (res.status === 404) {
+    // big models are stored in parts (hosting limit 25 MB per file)
+    const man = await fetch(url + '.parts.json');
+    if (man.ok) {
+      const { parts, size } = (await man.json()) as { parts: number; size: number };
+      const buf = new Uint8Array(size);
+      let got = 0;
+      for (let i = 0; i < parts; i++) {
+        const r = await fetch(`${url}.part${i}`);
+        if (!r.ok) throw new Error(`model part ${i} failed (${r.status})`);
+        const b = new Uint8Array(await r.arrayBuffer());
+        buf.set(b, got);
+        got += b.length;
+        post({ type: 'progress', stage: 'download', done: got, total: size });
+      }
+      try {
+        await cache?.put(url, new Response(buf.slice().buffer, { headers: { 'content-type': 'application/octet-stream' } }));
+      } catch {
+        /* quota */
+      }
+      return buf.buffer;
+    }
+  }
   if (!res.ok || !res.body) throw new Error(`model download failed (${res.status})`);
   const total = Number(res.headers.get('content-length')) || 0;
   const reader = res.body.getReader();

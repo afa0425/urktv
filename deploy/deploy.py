@@ -29,6 +29,7 @@ for root, _, names in os.walk(SITE):
         p = os.path.join(root, n)
         files.append((os.path.relpath(p, SITE).replace(os.sep, '/'), p))
 batch, size = [], 0
+keep_extra: set[str] = set()
 def flush():
     global batch, size
     if batch:
@@ -39,17 +40,23 @@ for key, p in ([] if SKIP_FILES else sorted(files)):
     if key == '_headers':
         continue
     b = open(p, 'rb').read()
-    if len(b) > 25 * 1024 * 1024:
-        print('  skip (over 25 MB):', key); continue
-    if size + len(b) > 40e6:
-        flush()
-    batch.append({'key': key, 'value': base64.b64encode(b).decode(), 'base64': True})
-    size += len(b)
+    # KV values are at most 25 MB: big files (AI models) go up in parts plus a small manifest
+    PART = 20 * 1024 * 1024
+    pieces = [(key, b)] if len(b) <= PART else \
+        [(f'{key}.part{i}', b[o:o + PART]) for i, o in enumerate(range(0, len(b), PART))] + \
+        [(f'{key}.parts.json', json.dumps({'parts': -(-len(b) // PART), 'size': len(b)}).encode())]
+    for k, v in pieces:
+        if size + len(v) > 40e6:
+            flush()
+        batch.append({'key': k, 'value': base64.b64encode(v).decode(), 'base64': True})
+        size += len(v)
+        if k != key:
+            keep_extra.add(k)
 flush()
 
 # 2b. remove files that are no longer part of the site (e.g. audio taken down)
 if not SKIP_FILES:
-    keep = {k for k, _ in files}
+    keep = {k for k, _ in files} | keep_extra
     stale, cursor = [], ''
     while True:
         r = call('GET', f"/storage/kv/namespaces/{ns['id']}/keys?limit=1000" + (f'&cursor={cursor}' if cursor else ''))
@@ -82,11 +89,19 @@ body = (f'--{boundary}\r\nContent-Disposition: form-data; name="metadata"\r\nCon
 call('PUT', f'/workers/scripts/{NAME}', body, f'multipart/form-data; boundary={boundary}', raw=True)
 print('worker uploaded')
 admin = next((a.split('=', 1)[1] for a in sys.argv if a.startswith('--admin-key=')), None)
-if pw or admin:
-    pairs = ([('SITE_USER', 'urktv'), ('SITE_PASS', pw)] if pw else []) + ([('ADMIN_KEY', admin)] if admin else [])
+upload = next((a.split('=', 1)[1] for a in sys.argv if a.startswith('--upload-key=')), None)
+if pw or admin or upload:
+    pairs = ([('SITE_USER', 'urktv'), ('SITE_PASS', pw)] if pw else []) + ([('ADMIN_KEY', admin)] if admin else []) \
+        + ([('UPLOAD_KEY', upload)] if upload else [])
     for name, text in pairs:
         call('PUT', f'/workers/scripts/{NAME}/secrets', {'name': name, 'text': text, 'type': 'secret_text'})
     print('secrets set:', ', '.join(n for n, _ in pairs))
+if '--no-password' in sys.argv:
+    try:
+        call('DELETE', f'/workers/scripts/{NAME}/secrets/SITE_PASS')
+        print('password removed: the site is open')
+    except SystemExit as e:
+        print('no password to remove' if '404' in str(e) or '10056' in str(e) else e)
 
 # 4. public on workers.dev
 call('POST', f'/workers/scripts/{NAME}/subdomain', {'enabled': True, 'previews_enabled': True})

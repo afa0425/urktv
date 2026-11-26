@@ -40,6 +40,8 @@ async function api(req, env, url) {
   }
   // upload (the importer sends notes + lyric timing; the audio stays on the importer's computer)
   if (path === 'songs' && req.method === 'POST') {
+    // only importers with the upload key may add songs (the site itself is open)
+    if (env.UPLOAD_KEY && req.headers.get('x-upload-key') !== env.UPLOAD_KEY) return json({ error: 'upload key required' }, 403);
     const body = await req.text();
     if (body.length > MAX_SONG) return json({ error: 'too large' }, 413);
     let p;
@@ -135,7 +137,7 @@ export default {
     const h = new Headers({ 'content-type': TYPES[ext] || 'application/octet-stream' });
     h.set('cache-control', key.startsWith('assets/') ? 'private, max-age=31536000, immutable' : 'private, max-age=60');
     h.set('x-robots-tag', 'noindex, nofollow');
-    if (key === 'import.html') {
+    if (key === 'import.html' || key === 'bench.html') {
       // the import page runs cross-origin isolated (multi-threaded AI)
       h.set('cross-origin-opener-policy', 'same-origin');
       h.set('cross-origin-embedder-policy', 'require-corp');
