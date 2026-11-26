@@ -213,10 +213,27 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
       const tr = transport.current;
       if (!(tr instanceof DualTransport)) return;
       tr.keepAhead();
-      extPost({ type: 'clock', t: tr.time(), playing: tr.playing() }); // MV time, same clock as the tapped audio
+      extPost({ type: 'clock', t: tr.time(), playing: tr.playing() && !tr.syncing() }); // MV time, same clock as the tapped audio
     }, 200);
     return () => window.clearInterval(id);
   }, [phase, backing, local]);
+
+  /** Everything needed to see where the backing track gets stuck, as text to copy. */
+  const diagText = () => {
+    const tr = transport.current;
+    const d = (ext.status?.diag ?? {}) as Record<string, unknown>;
+    const fmt2 = (x: unknown) => (typeof x === 'number' ? x.toFixed(2) : String(x ?? '-'));
+    return [
+      `擴充功能：${ext.present ? 'v' + ext.version : '沒偵測到'}，同意：${ext.consent ? '是' : '否'}，伴奏版：${backing ? '開' : '關'}`,
+      `原版小視窗：${tr instanceof DualTransport ? `${tr.lead.playing() ? '播放中' : '沒在播'} ${fmt2(tr.lead.time())} 秒` : '-'}`,
+      `主畫面：${tr instanceof DualTransport ? `${tr.main.playing() ? '播放中' : '沒在播'} ${fmt2(tr.main.time())} 秒${tr.syncing() ? '（等待同步）' : ''}` : '-'}`,
+      `擷取：${ext.tap === 'connected' ? '已接上' : ext.tap === 'blocked' ? '被瀏覽器擋住' : '還沒接上'}`,
+      `引擎：${ext.status?.state ?? '-'} / ${ext.status?.mode ?? '-'}，速度 ${fmt2(ext.status?.speed)} 倍，領先 ${fmt2(ext.status?.buffered)} 秒`,
+      `收到聲音 ${d.blocks ?? '-'} 段（最後 ${fmt2(d.lastTap)} 秒），待播 ${d.segments ?? '-'} 段，已播 ${d.played ?? '-'} 段，重來 ${d.resets ?? '-'} 次`,
+      `引擎時鐘 ${fmt2(d.clock)} 秒（${d.playing ? '播放中' : '暫停'}），音訊 ${d.ctx ?? '-'}${d.err ? '，錯誤：' + d.err : ''}${ext.status?.message ? '，訊息：' + ext.status.message : ''}`,
+      `瀏覽器：${navigator.userAgent}`,
+    ].join('\n');
+  };
 
   const changeVocal = (v: number) => {
     setVocal(v);
@@ -474,13 +491,15 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
       // the lead player starts first; the AI gets LEAD seconds of head start
       const m = MODELS.kara2;
       extPost({ type: 'start', lead: LEAD, vocal, mode: 'auto', modelUrl: MODEL_BASE + m.file, ortBase: ORT_BASE, model: 'kara2' });
-      tr.startStaggered(() => setCountdown(0));
+      let started = false;
+      tr.startStaggered(() => {
+        started = true;
+        setCountdown(0);
+      });
       setCountdown(LEAD);
-      const t0 = performance.now();
       const cd = window.setInterval(() => {
-        const left = Math.ceil(LEAD - (performance.now() - t0) / 1000);
-        setCountdown(Math.max(0, left));
-        if (left <= 0) window.clearInterval(cd);
+        if (started) return window.clearInterval(cd);
+        setCountdown(Math.max(1, Math.ceil(LEAD - tr.lead.time())));
       }, 250);
     } else tr?.play();
     setPhase('live');
@@ -652,6 +671,13 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
                         </span>
                         <input type="range" min={0} max={1} step={0.05} value={vocal} onChange={(e) => changeVocal(Number(e.target.value))} />
                       </label>
+                      <details className="diag">
+                        <summary>{t('ext.diag')}</summary>
+                        <pre>{diagText()}</pre>
+                        <button className="btn small" onClick={() => void navigator.clipboard?.writeText(diagText())}>
+                          {t('ext.diagCopy')}
+                        </button>
+                      </details>
                       {ext.status && (
                         <small className="muted">
                           {ext.status.state === 'error'

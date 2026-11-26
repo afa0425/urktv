@@ -417,21 +417,32 @@ export class DualTransport implements Transport {
   ended() {
     return this.main.ended();
   }
-  /** First start: the lead player starts now, the picture `ahead` seconds later. */
+  private waiting: 'main' | 'lead' | null = null;
+  /**
+   * First start: the lead player starts now; the picture starts once the lead is really `ahead`
+   * seconds in (YouTube buffers, so a fixed timer would leave the AI without its head start).
+   */
   startStaggered(onMainStart?: () => void) {
     this.lead.play();
-    window.clearTimeout(this.timer);
-    this.timer = window.setTimeout(() => {
-      this.main.play();
-      onMainStart?.();
-    }, this.ahead * 1000);
+    window.clearInterval(this.timer);
+    const t0 = performance.now();
+    this.timer = window.setInterval(() => {
+      // a lead that cannot get going (blocked, an ad) must not hold the picture forever
+      if (this.lead.time() >= this.ahead || performance.now() - t0 > (this.ahead + 20) * 1000) {
+        window.clearInterval(this.timer);
+        this.main.play();
+        onMainStart?.();
+      }
+    }, 100);
   }
   play() {
+    this.waiting = null;
     this.lead.play();
     this.main.play();
   }
   pause() {
-    window.clearTimeout(this.timer);
+    window.clearInterval(this.timer);
+    this.waiting = null;
     this.lead.pause();
     this.main.pause();
   }
@@ -439,14 +450,41 @@ export class DualTransport implements Transport {
     this.main.seek(t);
     this.lead.seek(t + this.ahead);
   }
-  /** Keep the lead exactly `ahead` seconds in front (buffering can make them drift). */
+  /**
+   * Keep the lead in front without seeking it (every seek throws away the AI's work): if the lead
+   * falls behind (buffering), the picture waits for it; if the picture falls behind, the lead waits.
+   */
   keepAhead() {
+    const gap = this.lead.time() - this.main.time();
+    if (this.waiting === 'main') {
+      if (gap >= this.ahead - 0.3) {
+        this.waiting = null;
+        this.main.play();
+      }
+      return;
+    }
+    if (this.waiting === 'lead') {
+      if (gap <= this.ahead + 0.3) {
+        this.waiting = null;
+        this.lead.play();
+      }
+      return;
+    }
     if (!this.main.playing() || !this.lead.playing()) return;
-    const d = this.lead.time() - this.main.time() - this.ahead;
-    if (Math.abs(d) > 0.6) this.lead.seek(this.main.time() + this.ahead);
+    if (gap < this.ahead - 3) {
+      this.waiting = 'main';
+      this.main.pause();
+    } else if (gap > this.ahead + 3) {
+      this.waiting = 'lead';
+      this.lead.pause();
+    }
+  }
+  /** True while one player waits for the other (shown as "buffering"). */
+  syncing() {
+    return this.waiting !== null;
   }
   destroy() {
-    window.clearTimeout(this.timer);
+    window.clearInterval(this.timer);
     this.lead.destroy();
     this.main.destroy();
   }

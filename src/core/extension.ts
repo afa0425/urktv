@@ -8,12 +8,15 @@ export interface ExtStatus {
   speed?: number;
   buffered?: number;
   message?: string;
+  diag?: Record<string, unknown>;
 }
 export interface ExtState {
   present: boolean;
   consent: boolean;
   version?: string;
   status?: ExtStatus;
+  /** The lead player's frame: connected to the extension, blocked by the browser, or not yet. */
+  tap?: 'connected' | 'blocked';
 }
 
 let state: ExtState = { present: false, consent: false };
@@ -29,8 +32,11 @@ if (typeof window !== 'undefined') {
     const m = e.data;
     if (m.type === 'ready') set({ present: true, consent: !!m.consent, version: m.version });
     else if (m.type === 'status') {
-      if (m.mode === 'tap' && m.state !== 'error') return; // the player frame just confirmed it is connected
-      set({ status: { state: m.state, mode: m.mode, speed: m.speed, buffered: m.buffered, message: m.message } });
+      if (m.mode === 'tap') {
+        set({ tap: m.state === 'error' ? 'blocked' : 'connected' });
+        if (m.state !== 'error') return;
+      }
+      set({ status: { state: m.state, mode: m.mode, speed: m.speed, buffered: m.buffered, message: m.message, diag: m.diag } });
     }
   });
   // ask: the extension answers if it is installed

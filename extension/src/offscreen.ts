@@ -33,11 +33,18 @@ const S = {
   speed: 0,
   busy: false,
   loadingModel: false,
+  // diagnostics
+  blocks: 0,
+  lastTap: -1,
+  played: 0,
+  resets: 0,
+  lastError: '',
 };
 
 const toPage = (msg: unknown) => chrome.runtime.sendMessage({ to: 'page', msg }).catch(() => {});
 
 function reset(t: number) {
+  S.resets++;
   S.t0 = t;
   S.len = 0;
   S.done = 0;
@@ -166,7 +173,8 @@ async function work() {
       }
     }
   } catch (e: any) {
-    toPage({ type: 'status', state: 'error', message: String(e?.message ?? e) });
+    S.lastError = String(e?.message ?? e);
+    toPage({ type: 'status', state: 'error', message: S.lastError });
   } finally {
     S.busy = false;
   }
@@ -195,6 +203,7 @@ function schedule() {
       return src;
     };
     s.src = [mk(s.inst, instGain), mk(s.voc, vocGain)];
+    S.played++;
   }
   // forget what has been played
   S.segs = S.segs.filter((s) => s.t + s.inst[0].length / RATE > m - 2);
@@ -222,7 +231,10 @@ setInterval(() => {
       S.using = 'classic';
       toPage({ type: 'status', state: 'fallback', mode: 'classic', speed: S.speed, message: 'too slow for the AI model' });
     }
-    toPage({ type: 'status', state: S.loadingModel ? 'loading' : 'running', mode: S.using, speed: S.speed, buffered: ahead });
+    toPage({
+      type: 'status', state: S.loadingModel ? 'loading' : 'running', mode: S.using, speed: S.speed, buffered: ahead,
+      diag: { blocks: S.blocks, lastTap: S.lastTap, segments: S.segs.length, played: S.played, resets: S.resets, clock: S.clock.t, playing: S.clock.playing, ctx: ctx.state, err: S.lastError },
+    });
   }
 }, 250);
 
@@ -231,10 +243,16 @@ chrome.runtime.onMessage.addListener((m: any) => {
   const msg = m.msg as PageMsg | TapBlock;
   if (msg.type === 'tap') {
     if (!S.running) return;
+    S.blocks++;
+    S.lastTap = msg.t;
     append(msg.t, decode16(msg.l), decode16(msg.r));
     void work();
   } else if (msg.type === 'start') {
     S.running = true;
+    S.blocks = 0;
+    S.played = 0;
+    S.resets = 0;
+    S.lastError = '';
     S.mode = msg.mode;
     vocGain.gain.value = msg.vocal;
     void ctx.resume();

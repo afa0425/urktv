@@ -1045,3 +1045,18 @@ a.btn {
   text-align: center;
   font-weight: 700;
 }
+.diag summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+.diag pre {
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 0.72rem;
+  background: var(--bg);
+  padding: 8px;
+  border-radius: 8px;
+  max-height: 220px;
+  overflow: auto;
+}
