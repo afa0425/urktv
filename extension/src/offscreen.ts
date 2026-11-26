@@ -247,14 +247,17 @@ function aiAbort(stop: boolean) {
 const LN = 4096;
 const LH = 1024;
 const LW = 512;
-const NEW = 176; // 4.1 s out per run
 const FUT = 40; // 0.9 s look-ahead
-const PAST = LW - NEW - FUT;
+/** Frames out per run: small while little backing is ready (start fast), bigger once ahead (cheaper). */
+function liteN() {
+  const ahead = S.t0 + (S.lf * LH) / RATE - nowMedia();
+  return ahead < 2.5 ? 48 : ahead < 5 ? 96 : 176;
+}
 const LB = 1024; // bins the model sees (up to 11 kHz); above that everything goes to the backing
 const lWin = new Float64Array(LN).map((_, i) => 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / LN));
 const lFft = new FFT(LN);
 /** Samples of input the next light run needs. */
-const liteNeed = () => (S.lf + NEW + FUT - 1) * LH + LN;
+const liteNeed = (n: number) => (S.lf + n + FUT - 1) * LH + LN;
 
 function liteRun(names: string[], spec: Float32Array, dims: number[]): Promise<Float32Array[]> {
   const id = ++aiId;
@@ -309,9 +312,10 @@ function liteFromHere() {
 
 /** One light-AI run: frames lf .. lf+NEW-1 become backing + vocal. False if not enough input yet. */
 async function liteStep(): Promise<boolean | 'stale'> {
-  if (S.len < liteNeed()) return false;
+  const NEW = liteN();
+  if (S.len < liteNeed(NEW)) return false;
   const f0 = S.lf;
-  const a = f0 - PAST;
+  const a = f0 - (LW - NEW - FUT);
   const t1 = performance.now();
   const keep0 = f0 - 3; // frames that reach into the output region
   const keepN = NEW + 3;
@@ -594,7 +598,19 @@ function startLite(base: string) {
     return;
   }
   S.using = 'classic';
-  if (S.liteLoading || !base) return;
+  if (S.liteLoading) {
+    // preloading: pick it up when it is ready
+    const wait = window.setInterval(() => {
+      if (S.liteLoading) return;
+      window.clearInterval(wait);
+      if (S.lite && S.mode === 'lite' && S.running) {
+        liteFromHere();
+        void work();
+      }
+    }, 100);
+    return;
+  }
+  if (!base) return;
   S.liteLoading = true;
   S.loadingModel = true;
   loadLite(base)
@@ -648,6 +664,14 @@ chrome.runtime.onMessage.addListener((m: any, _s: unknown, reply: (x: unknown) =
           S.done = Math.max(0, S.len - (S.cfg!.nFft / 2)); // continue from here with the model
         })
         .catch((e) => toPage({ type: 'status', state: 'fallback', mode: 'classic', message: String(e?.message ?? e) }));
+    }
+  } else if ((msg as any).type === 'preload') {
+    // a song page opened: get the light AI ready before the singer presses start
+    if (!S.lite && !S.liteLoading && (msg as any).liteBase) {
+      S.liteLoading = true;
+      loadLite((msg as any).liteBase)
+        .catch(() => {})
+        .finally(() => (S.liteLoading = false));
     }
   } else if (msg.type === 'clock' && !S.running) {
     // the page is singing but this engine never got a start (Chrome reopened it): ask for one

@@ -57,7 +57,7 @@ export function App() {
     );
   }
 
-  const tabs: Tab[] = ['home', 'mine', 'queue', 'history', 'settings'];
+  const tabs: Tab[] = ['home', 'queue', 'history', 'settings'];
   return (
     <div className="shell">
       <header className="topbar">

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { MicPitch } from '../audio/mic';
 import { midiName } from '../audio/pitch';
-import { detectKind, lineAt, parseChart, type Chart } from '../core/chart';
+import { lineAt, parseChart, type Chart } from '../core/chart';
 import { foldNear, FreeScorer, GuideScorer, type Difficulty, type ScoreExtras, type Scorer, type ScoreResult } from '../core/score';
 import { charts, DEMO_ID, renameSong, settings, useStore, type Song } from '../core/store';
 import { demoChart, DualTransport, LocalTransport, SynthTransport, toUltraStar, YouTubeTransport, type Transport } from '../core/transport';
@@ -51,7 +51,6 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   const [title, setTitle] = useState(song.title);
   const [micErr, setMicErr] = useState<I18nKey | null>(null);
   const [ytErr, setYtErr] = useState<I18nKey | null>(null);
-  const [chartErr, setChartErr] = useState(false);
   const [hud, setHud] = useState({ score: 0, note: '', level: 0, time: 0, dur: 0, playing: false });
   // your own song: tracks from this browser's storage
   const [local, setLocal] = useState<Layered | null>(null);
@@ -68,7 +67,6 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   const leadRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const ktvRef = useRef<HTMLDivElement>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
   const transport = useRef<Transport | null>(null);
   const mic = useRef(new MicPitch());
   const scorer = useRef<Scorer>(new FreeScorer());
@@ -121,9 +119,12 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   useEffect(() => {
     if (ext.present && !ext.consent) extPost({ type: 'consent', ok: true });
   }, [ext.present, ext.consent]);
+  // get the light AI ready while the singer looks at the page (it is then instant on start)
+  useEffect(() => {
+    if (backing) extPost({ type: 'preload', liteBase: MODEL_BASE });
+  }, [backing]);
   const [backingFailed, setBackingFailed] = useState(false);
   const [drag, setDrag] = useState<number | null>(null);
-  const [lyricsNote, setLyricsNote] = useState('');
   const triedLyrics = useRef('');
   // lyrics found by an older search (it could pick another song from the same drama): look again
   const staleAuto = saved?.kind === 'lrc' && saved.auto !== LYRICS_V && saved.offsetMs === 0 && !saved.name?.startsWith('manual');
@@ -136,10 +137,9 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
         if (off) return;
         if (!hit) {
           if (staleAuto) removeChart();
-          return setLyricsNote(t('stage.lyricsNone'));
+          return;
         }
         charts.set((c) => ({ ...c, [song.id]: { raw: hit.lrc, kind: 'lrc', offsetMs: 0, transpose: 0, auto: LYRICS_V, name: hit.name } }));
-        setLyricsNote(hit.name);
       });
     // the video's length helps pick the right version: give the player a moment to know it
     const id = window.setTimeout(go, transport.current?.duration() ? 0 : 1500);
@@ -633,7 +633,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
       return { ahead: n, resume: Math.min(n, 600) - 0.5 };
     }
     if (st?.mode === 'classic') return { ahead: 2, resume: 1.5 }; // light AI could not load
-    return { ahead: LITE_AHEAD, resume: 3 };
+    return { ahead: LITE_AHEAD, resume: 2 };
   };
   /** Seconds of AI backing to have ready so it lasts `left` seconds of song at speed sp. */
   const aiNeed = (sp: number, left: number) => (sp >= 1.15 ? 8 : Math.min(600, left * (1 / sp - 1) + 8));
@@ -707,7 +707,8 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
           if (engineMode() === 'ai' && st?.mode !== 'ai' && !(aiSpeed() > 0)) return false;
           const pl = plan(tr.duration() || 300);
           tr.ahead = pl.ahead;
-          return (st?.buffered ?? 0) >= pl.resume && tr.lead.time() >= Math.min(pl.ahead, 600) - 1;
+          // the light AI starts as soon as a little backing is ready; the AI needs its full head start
+          return (st?.buffered ?? 0) >= pl.resume && (engineMode() === 'lite' || tr.lead.time() >= Math.min(pl.ahead, 600) - 1);
         },
       );
       setPrep({ pct: null, label: '載入 AI 模型' });
@@ -755,35 +756,8 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
     setRun((r) => r + 1);
   };
 
-  const importChart = async (file: File | undefined) => {
-    setChartErr(false);
-    if (!file) return;
-    try {
-      if (file.size > 600_000) throw new Error('too big');
-      const raw = await file.text();
-      const kind = detectKind(raw);
-      if (!kind) throw new Error('format');
-      parseChart(raw, kind);
-      charts.set((c) => ({ ...c, [song.id]: { raw, kind, offsetMs: 0, transpose: 0 } }));
-    } catch {
-      setChartErr(true);
-    }
-    if (fileRef.current) fileRef.current.value = '';
-  };
   const patchChart = (p: { offsetMs?: number; transpose?: number }) =>
     charts.set((c) => (c[song.id] ? { ...c, [song.id]: { ...c[song.id], ...p } } : c));
-  /** KTV way to fix the timing: press when a line starts singing; that line snaps to now. */
-  const alignLyrics = () => {
-    const tr = transport.current;
-    if (!tr || !chart?.lines.length) return;
-    manualLyrics.current = true;
-    const now = tr.time();
-    const tc = now - live.current.offset;
-    let best = chart.lines[0];
-    for (const l of chart.lines) if (Math.abs(l.start - tc) < Math.abs(best.start - tc)) best = l;
-    // the line about to start or just started, not one far away
-    patchChart({ offsetMs: Math.round((now - best.start) * 1000) });
-  };
   const removeChart = () =>
     charts.set((c) => {
       const { [song.id]: _gone, ...rest } = c;
@@ -1005,40 +979,6 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
             </div>
           )}
 
-          {ytPlain && (saved?.kind === 'lrc' || lyricsNote) && (
-            <div className="card col lyric-card">
-              <div className="label">歌詞</div>
-              <small className="muted">{saved?.name ?? lyricsNote}</small>
-              {saved?.kind === 'lrc' && (
-                <>
-                  <div className="row wrap lyric-tools">
-                    <button className="btn small" onClick={() => ((manualLyrics.current = true), patchChart({ offsetMs: (saved.offsetMs ?? 0) - 500 }))}>
-                      ⏪ 早一點
-                    </button>
-                    <span className="muted small">{((saved.offsetMs ?? 0) / 1000).toFixed(1)}s</span>
-                    <button className="btn small" onClick={() => ((manualLyrics.current = true), patchChart({ offsetMs: (saved.offsetMs ?? 0) + 500 }))}>
-                      晚一點 ⏩
-                    </button>
-                  </div>
-                  {phase === 'live' && (
-                    <button className="btn small primary" onClick={alignLyrics}>
-                      {t('stage.lyricsTap')}
-                    </button>
-                  )}
-                  <button
-                    className="btn link small"
-                    onClick={() => {
-                      removeChart();
-                      setLyricsNote('已拿掉。可在「更多設定」匯入自己的歌詞檔（.lrc）');
-                    }}
-                  >
-                    不是這首歌？拿掉歌詞
-                  </button>
-                </>
-              )}
-            </div>
-          )}
-
           {ytAny && (
             <div className="card col backing-card">
               {backingFailed && <p className="notice warn">{t('ext.failed')}</p>}
@@ -1204,59 +1144,6 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
             </div>
           )}
 
-          {!isDemo && !own && (
-            <div className="card col">
-              <div className="label">{t('stage.chart')}</div>
-              <input
-                ref={fileRef}
-                type="file"
-                accept=".txt,.lrc,text/plain"
-                hidden
-                onChange={(e) => importChart(e.target.files?.[0])}
-              />
-              <button className="btn" onClick={() => fileRef.current?.click()}>
-                {t('stage.chart.import')}
-              </button>
-              {chartErr && <p className="notice warn">{t('stage.chart.bad')}</p>}
-              {saved && chart && !chart.hasPitch && <p className="muted small">{t('stage.chart.lyricsOnly')}</p>}
-              {saved && (
-                <>
-                  <label className="field">
-                    <span>
-                      {t('stage.offset')} · {(saved.offsetMs / 1000).toFixed(2)} {t('common.sec')}
-                    </span>
-                    <input
-                      type="range"
-                      min={-10000}
-                      max={10000}
-                      step={50}
-                      value={saved.offsetMs}
-                      onChange={(e) => patchChart({ offsetMs: Number(e.target.value) })}
-                    />
-                  </label>
-                  {guide && (
-                    <label className="field">
-                      <span>
-                        {t('stage.key')} · {saved.transpose > 0 ? '+' : ''}
-                        {saved.transpose} {t('common.semitone')}
-                      </span>
-                      <input
-                        type="range"
-                        min={-6}
-                        max={6}
-                        step={1}
-                        value={saved.transpose}
-                        onChange={(e) => patchChart({ transpose: Number(e.target.value) })}
-                      />
-                    </label>
-                  )}
-                  <button className="btn link danger" onClick={removeChart}>
-                    {t('stage.chart.remove')}
-                  </button>
-                </>
-              )}
-            </div>
-          )}
         </aside>
       </div>
     </div>

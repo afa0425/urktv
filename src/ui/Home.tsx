@@ -30,7 +30,7 @@ function Move({ rank, last }: { rank: number; last: number | null }) {
   return <span className="mv same">—</span>;
 }
 
-export function Home({ onSing, onMine }: { onSing(song: Song): void; onMine(): void }) {
+export function Home({ onSing }: { onSing(song: Song): void; onMine?(): void }) {
   const t = useT();
   const plays = useStore(history);
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
@@ -227,11 +227,6 @@ export function Home({ onSing, onMine }: { onSing(song: Song): void; onMine(): v
       )}
 
       <section className="quick small-quick">
-        <button className="quick-card" onClick={onMine}>
-          <span className="quick-icon">🎛️</span>
-          <strong>{t('home.mine.title')}</strong>
-          <span className="muted small">{t('home.mine.desc')}</span>
-        </button>
         <button className="quick-card" onClick={() => onSing({ id: DEMO_ID, title: t('stage.demoTitle') })}>
           <span className="quick-icon">🎵</span>
           <strong>{t('home.demo.title')}</strong>

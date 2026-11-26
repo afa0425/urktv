@@ -65,4 +65,4 @@ const num = (v: string) => v.split('.').map(Number).reduce((a, x) => a * 1000 + 
 /** The installed extension is older than the one the site offers. */
 export const extOutdated = (v?: string) => !!v && num(v) < num(EXT_LATEST);
 /** Light AI: how far the lead player runs ahead (it works in 4 s windows with 1 s look-ahead). */
-export const LITE_AHEAD = 7;
+export const LITE_AHEAD = 4;
