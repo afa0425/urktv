@@ -26,12 +26,39 @@ if ((self as any).name !== 'em-pthread')
         (ort.env.webgpu as any).powerPreference = 'high-performance';
         const models: { name: string; bytes: ArrayBuffer }[] = m.models ?? [{ name: 'main', bytes: m.bytes }];
         let used = '';
+        const times: Record<string, number> = {};
         for (const md of models) {
-          const r = await create(md.bytes, m.eps);
-          sessions.set(md.name, r.s);
-          used = r.ep;
+          if (m.probe && m.eps.length > 1) {
+            // the graphics card is not always faster (built-in GPUs often lose to the CPU): time one
+            // window on each and keep the faster
+            let best: { s: ort.InferenceSession; ep: string; t: number } | null = null;
+            for (const ep of m.eps as string[]) {
+              try {
+                const s = await ort.InferenceSession.create(new Uint8Array(md.bytes), { executionProviders: [ep] });
+                const x = new Float32Array(m.probe.reduce((a: number, b: number) => a * b, 1));
+                await s.run({ [s.inputNames[0]]: new ort.Tensor('float32', x, m.probe) }); // warm-up
+                const t0 = performance.now();
+                await s.run({ [s.inputNames[0]]: new ort.Tensor('float32', x, m.probe) });
+                const t = performance.now() - t0;
+                times[ep] = Math.round(t);
+                if (!best || t < best.t) {
+                  if (best) await best.s.release();
+                  best = { s, ep, t };
+                } else await s.release();
+              } catch {
+                /* this one cannot run here */
+              }
+            }
+            if (!best) throw new Error('model failed to load');
+            sessions.set(md.name, best.s);
+            used = best.ep;
+          } else {
+            const r = await create(md.bytes, m.eps);
+            sessions.set(md.name, r.s);
+            used = r.ep;
+          }
         }
-        postMessage({ type: 'ready', ep: used });
+        postMessage({ type: 'ready', ep: used, times });
       } else if (m.type === 'run') {
         // every named model (or just `name`) on the same input; outputs in the same order
         const names: string[] = m.names ?? ['main'];

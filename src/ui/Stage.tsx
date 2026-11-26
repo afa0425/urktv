@@ -399,6 +399,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
       `擷取：${ext.tap === 'connected' ? '已接上' : ext.tap === 'blocked' ? '被瀏覽器擋住' : '還沒接上'}`,
       `引擎：${ext.status?.state ?? '-'} / ${ext.status?.mode ?? '-'}，速度 ${fmt2(ext.status?.speed)} 倍，領先 ${fmt2(ext.status?.buffered)} 秒`,
       `收到聲音 ${d.blocks ?? '-'} 段（最後 ${fmt2(d.lastTap)} 秒），待播 ${d.segments ?? '-'} 段，已播 ${d.played ?? '-'} 段，重來 ${d.resets ?? '-'} 次`,
+      d.ep ? `高品質模型跑在：${d.ep === 'wasm' ? 'CPU' : '顯示卡'}（實測 ${Object.entries(d.epTimes ?? {}).map(([k, v]) => `${k === 'wasm' ? 'CPU' : '顯示卡'} ${v}ms`).join('、') || '已記住'}）` : '',
       `引擎時鐘 ${fmt2(d.clock)} 秒（${d.playing ? '播放中' : '暫停'}），音訊 ${d.ctx ?? '-'}${d.err ? '，錯誤：' + d.err : ''}${ext.status?.message ? '，訊息：' + ext.status.message : ''}`,
       `瀏覽器：${navigator.userAgent}`,
     ].join('\n');

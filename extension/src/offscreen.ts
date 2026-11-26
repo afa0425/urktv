@@ -48,6 +48,8 @@ const S = {
   liteLoading: false,
   lf: 0, // light AI: next STFT frame to output
   makeup: 1, // backing loudness restore (1 = none)
+  ep: '', // what runs the high-quality model: webgpu or wasm (CPU)
+  epTimes: {} as Record<string, number>,
   vocal: 0,
   cfg: null as (MdxConfig & { file: string }) | null,
   session: null as Worker | null, // the AI model, in its own worker
@@ -451,13 +453,29 @@ async function loadModel(url: string, base: string, key: string) {
     }
     bytes = buf.buffer;
   }
-  const eps = 'gpu' in navigator ? ['webgpu', 'wasm'] : ['wasm'];
+  // which runs this model faster here, graphics card or CPU: measured once, remembered
+  const remembered = localStorage.getItem('ep.' + key);
+  const eps = remembered ? [remembered] : 'gpu' in navigator ? ['webgpu', 'wasm'] : ['wasm'];
+  const cfg0 = MODELS[key];
   const w = new Worker(chrome.runtime.getURL('aiworker.js'), { type: 'module' });
   await new Promise<void>((ok, bad) => {
-    w.onmessage = (e) => (e.data.type === 'ready' ? ok() : bad(new Error(e.data.message)));
+    w.onmessage = (e) => {
+      if (e.data.type !== 'ready') return bad(new Error(e.data.message));
+      if (!remembered && e.data.ep) localStorage.setItem('ep.' + key, e.data.ep);
+      S.ep = e.data.ep;
+      S.epTimes = e.data.times ?? {};
+      ok();
+    };
     w.onerror = (e) => bad(new Error(e.message || 'AI worker failed'));
     w.postMessage(
-      { type: 'init', bytes, eps, wasmPaths: chrome.runtime.getURL('ort/'), threads: Math.max(1, Math.min(8, (navigator.hardwareConcurrency || 2) - 2)) },
+      {
+        type: 'init',
+        bytes,
+        eps,
+        probe: eps.length > 1 ? [1, 4, cfg0.dimF, cfg0.dimT] : undefined,
+        wasmPaths: chrome.runtime.getURL('ort/'),
+        threads: Math.max(1, Math.min(16, (navigator.hardwareConcurrency || 2) - 1)),
+      },
       [bytes],
     );
   });
@@ -624,7 +642,7 @@ setInterval(() => {
     }
     toPage({
       type: 'status', state: S.loadingModel ? 'loading' : 'running', mode: S.using, speed: S.speed, buffered: ahead,
-      diag: { blocks: S.blocks, lastTap: S.lastTap, segments: S.segs.length, played: S.played, resets: S.resets, clock: S.clock.t, playing: S.clock.playing, ctx: ctx.state, err: S.lastError },
+      diag: { ep: S.ep, epTimes: S.epTimes, blocks: S.blocks, lastTap: S.lastTap, segments: S.segs.length, played: S.played, resets: S.resets, clock: S.clock.t, playing: S.clock.playing, ctx: ctx.state, err: S.lastError },
     });
   }
 }, 250);
