@@ -7,6 +7,7 @@ import { HistoryView, QueueView, Result, SettingsView } from './ui/Views';
 import { Home } from './ui/Home';
 import { MineView } from './ui/Mine';
 import { ExtUpdate } from './ui/ExtUpdate';
+import { EXT_LATEST, extOutdated, useExtension } from './core/extension';
 
 type Tab = 'home' | 'mine' | 'queue' | 'history' | 'settings';
 type View =
@@ -19,6 +20,7 @@ let stageKey = 0;
 export function App() {
   const t = useT();
   const q = useStore(queue);
+  const ext = useExtension();
   const [view, setView] = useState<View>({ name: 'home' });
 
   const sing = (song: Song) => setView({ name: 'stage', song, key: ++stageKey });
@@ -74,6 +76,16 @@ export function App() {
               {tab === 'queue' && q.length > 0 && <span className="badge">{q.length}</span>}
             </button>
           ))}
+          {/* always here: install, or update when a newer version is out */}
+          <a
+            className={'tab ext-tab' + (!ext.present || extOutdated(ext.version) ? ' attn' : '')}
+            href="extension.html"
+            target="_blank"
+            rel="noopener"
+            title={ext.present ? `已安裝 v${ext.version}，最新 v${EXT_LATEST}` : '還沒安裝'}
+          >
+            🧩 {!ext.present ? '安裝擴充功能' : extOutdated(ext.version) ? `升級擴充功能 → v${EXT_LATEST}` : `擴充功能 v${ext.version} ✓`}
+          </a>
         </nav>
       </header>
       <main>

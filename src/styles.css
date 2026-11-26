@@ -1578,3 +1578,14 @@ a.btn {
 .poster-art::before { content: '♪'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 2.4rem; color: rgba(255,255,255,0.25); }
 .poster-art img { position: relative; }
 .ktv.empty { min-height: 0; padding: 0; height: 8px; }
+.ext-tab { text-decoration: none; }
+.ext-tab.attn {
+  color: #1a0f16 !important;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  font-weight: 800;
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 92, 138, 0.5); }
+  50% { box-shadow: 0 0 0 6px rgba(255, 92, 138, 0); }
+}
