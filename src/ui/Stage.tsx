@@ -654,7 +654,9 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
                       </label>
                       {ext.status && (
                         <small className="muted">
-                          {ext.status.state === 'loading'
+                          {ext.status.state === 'error'
+                            ? t(ext.status.message === 'audio-blocked' ? 'ext.blocked' : 'ext.error')
+                            : ext.status.state === 'loading'
                             ? t('ext.loading')
                             : ext.status.mode === 'ai'
                               ? t('ext.ai', { x: (ext.status.speed ?? 0).toFixed(1) })

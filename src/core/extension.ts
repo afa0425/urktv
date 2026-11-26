@@ -28,7 +28,10 @@ if (typeof window !== 'undefined') {
     if (e.source !== window || e.data?.source !== 'urktv-ext') return;
     const m = e.data;
     if (m.type === 'ready') set({ present: true, consent: !!m.consent, version: m.version });
-    else if (m.type === 'status') set({ status: { state: m.state, mode: m.mode, speed: m.speed, buffered: m.buffered, message: m.message } });
+    else if (m.type === 'status') {
+      if (m.mode === 'tap' && m.state !== 'error') return; // the player frame just confirmed it is connected
+      set({ status: { state: m.state, mode: m.mode, speed: m.speed, buffered: m.buffered, message: m.message } });
+    }
   });
   // ask: the extension answers if it is installed
   setTimeout(() => extPost({ type: 'hello' }), 0);
