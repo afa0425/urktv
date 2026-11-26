@@ -13,6 +13,7 @@ import { fromInt16, getLocal, isLocal } from '../separate/db';
 import { computeHighlights, isCatalog, loadCatalog, type Layered } from '../core/catalog';
 import { LiveNotes } from '../core/liveNotes';
 import { ExtUpdate } from './ExtUpdate';
+import { Prep } from './Prep';
 import { drawDualLane, meanOffset, type DualState } from './dualLane';
 import { useT, type I18nKey } from '../i18n';
 import { drawLane, nearestNote, type LaneState, type TracePoint } from './lane';
@@ -158,11 +159,12 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
     };
   }, [ytPlain, saved, title, song.id]);
   const [diagCopied, setDiagCopied] = useState(false);
-  const [countdown, setCountdown] = useState(0);
+  // getting the backing ready: progress 0-100, or null while the model loads
+  const [prep, setPrep] = useState<{ pct: number | null; label: string } | null>(null);
   const mainSince = useRef(0);
   const manualLyrics = useRef(false);
   const lastRestart = useRef(0);
-  const [hold, setHold] = useState<number | null>(null); // seconds of backing still to prepare
+  const [hold, setHold] = useState<number | null>(null); // mid-song wait: progress 0-100
   // gray bars made live by the extension (songs without prepared bars)
   const liveNotes = useRef(new LiveNotes());
   useEffect(() => {
@@ -326,8 +328,8 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
           rebuffering.current = false;
           tr.main.play();
         }
-        const left = rebuffering.current && !tr.lead.ended() ? Math.max(1, Math.ceil(Math.min(want, 600) - b)) : null;
-        setHold((h) => (h === left ? h : left));
+        const pct = rebuffering.current && !tr.lead.ended() ? Math.round((Math.max(0, b) / Math.max(0.5, Math.min(want, 600) - 0.5)) * 100) : null;
+        setHold((h) => (h === pct ? h : pct));
       }
       // the backing follows the picture: while the picture plays, so does the backing (even if the
       // lead is waiting for it to catch up: what the picture needs is already in the buffer)
@@ -699,7 +701,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
       tr.startStaggered(
         () => {
           started = true;
-          setCountdown(0);
+          setPrep(null);
         },
         () => {
           const st = extRef.current.status;
@@ -717,12 +719,17 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
           return (st?.buffered ?? 0) >= pl.resume && tr.lead.time() >= Math.min(pl.ahead, 600) - 1;
         },
       );
-      setCountdown(LEAD);
+      setPrep({ pct: null, label: '載入 AI 模型' });
       const cd = window.setInterval(() => {
         if (started) return window.clearInterval(cd);
+        const st = extRef.current.status;
+        if (!st || st.state === 'loading' || (engineMode() === 'lite' && st.mode !== 'lite' && !extRef.current.fellBack)) {
+          setPrep({ pct: null, label: '載入 AI 模型（第一次要下載，之後很快）' });
+          return;
+        }
         const pl = plan(tr.duration() || 300);
-        const b = extRef.current.status?.buffered ?? 0;
-        setCountdown(Math.max(1, Math.ceil(pl.resume + 0.5 - Math.max(0, b))));
+        const b = Math.max(0, st.buffered ?? 0);
+        setPrep({ pct: (b / Math.max(0.5, pl.resume)) * 100, label: engineMode() === 'ai' ? '高品質 AI 正在分析這首歌' : 'AI 正在分析這首歌' });
       }, 250);
     } else tr?.play();
     setPhase('live');
@@ -830,20 +837,21 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
             {isDemo && <div className="demo-art">♪ Do · Re · Mi · Fa · Sol</div>}
             {own && !local?.video && <div className="demo-art">♪ {title}</div>}
             {ytErr && <div className="overlay error">{t(ytErr)}</div>}
-            {phase === 'live' && backing && hold !== null && (
-              <div className="overlay hold">
-                <p>
-                  {bmode === 'ai' && !extRef.current.fellBack ? '✨ 高品質伴奏準備中' : '伴奏準備中'}，還要約 <strong>{hold}</strong> 秒
-                </p>
-                {bmode === 'ai' && aiSpeed() > 0 && aiSpeed() < 1.15 && (
-                  <p className="muted small">你的電腦算 AI 是 {aiSpeed().toFixed(1)} 倍速，比歌慢，所以要先多算一段</p>
-                )}
-                {bmode === 'ai' && (
-                  <button className="btn primary" onClick={() => pickMode('fast')}>
-                    ⚡ 改用輕量伴奏（馬上繼續）
-                  </button>
-                )}
-              </div>
+            {phase === 'live' && backing && prep && (
+              <Prep
+                pct={prep.pct}
+                label={prep.label}
+                sub={bmode === 'ai' && aiSpeed() > 0 && aiSpeed() < 1.15 ? `你的電腦算高品質 AI 是 ${aiSpeed().toFixed(1)} 倍速，所以要先多算一段` : undefined}
+                onFast={bmode === 'ai' ? () => pickMode('fast') : undefined}
+              />
+            )}
+            {phase === 'live' && backing && !prep && hold !== null && (
+              <Prep
+                pct={hold}
+                label={bmode === 'ai' && !extRef.current.fellBack ? '高品質伴奏跟上中' : '伴奏跟上中'}
+                sub={bmode === 'ai' && aiSpeed() > 0 && aiSpeed() < 1.15 ? `你的電腦算高品質 AI 是 ${aiSpeed().toFixed(1)} 倍速，比歌慢` : undefined}
+                onFast={bmode === 'ai' ? () => pickMode('fast') : undefined}
+              />
             )}
             {localErr && <div className="overlay error">{t('mine.missing')}</div>}
             {own && !local && !localErr && <div className="overlay">{t('mine.loading')}</div>}
@@ -957,16 +965,6 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
             </div>
           )}
           {lyricsNote && <p className="muted small lyric-src">{lyricsNote}</p>}
-          {countdown > 0 && (
-            <div className="notice ok countdown">
-              🎛️ {t('ext.countdown', { n: countdown })}
-              {bmode === 'ai' && countdown > 5 && (
-                <button className="btn small primary" style={{ marginLeft: 10 }} onClick={() => pickMode('fast')}>
-                  ⚡ 改用輕量伴奏（馬上開始）
-                </button>
-              )}
-            </div>
-          )}
           {saved?.kind === 'lrc' && phase === 'live' && (
             <div className="lyric-nudge">
               <button className="btn small" onClick={() => ((manualLyrics.current = true), patchChart({ offsetMs: (saved.offsetMs ?? 0) - 500 }))}>
