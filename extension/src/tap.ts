@@ -4,7 +4,6 @@
 import { encode16 } from './protocol';
 
 const BLOCK = 8192;
-let port: chrome.runtime.Port | null = null;
 let armed = false;
 let ctx: AudioContext | null = null;
 let pass: GainNode | null = null; // the original sound, back to the speakers when not capturing
@@ -46,8 +45,13 @@ async function hook(video: HTMLVideoElement) {
     const l = e.inputBuffer.getChannelData(0);
     const r = e.inputBuffer.numberOfChannels > 1 ? e.inputBuffer.getChannelData(1) : l;
     const t = video.currentTime - BLOCK / c.sampleRate;
-    if (!port) port = chrome.runtime.connect({ name: 'tap' });
-    port.postMessage({ type: 'tap', t, rate: c.sampleRate, l: encode16(l), r: encode16(r) });
+    // straight to the engine (the offscreen page): not through the background worker, which Chrome
+    // shuts down when idle (that cut the sound off after about a minute)
+    try {
+      chrome.runtime.sendMessage({ to: 'engine', msg: { type: 'tap', t, rate: c.sampleRate, l: encode16(l), r: encode16(r) } }).catch(() => {});
+    } catch {
+      /* extension reloaded: nothing to send to */
+    }
   };
   video.addEventListener('play', () => void c.resume());
   document.documentElement.dataset.urktvTap = 'lead'; // marker for testing

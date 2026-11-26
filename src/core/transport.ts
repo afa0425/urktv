@@ -406,7 +406,8 @@ export class DualTransport implements Transport {
   constructor(
     readonly main: YouTubeTransport,
     readonly lead: YouTubeTransport,
-    readonly ahead: number,
+    /** How far the lead runs in front: 9 s for the AI, about 2 s for the classic vocal cut. */
+    public ahead: number,
   ) {}
   private timer = 0;
   time() {
@@ -457,6 +458,12 @@ export class DualTransport implements Transport {
   seek(t: number) {
     t = Math.max(0, t);
     if (this.solo) return this.main.seek(t);
+    // inside what the lead has already played (and the extension already turned into backing):
+    // just move the picture, the backing follows at once
+    if (t >= this.main.time() && t <= this.lead.time() - 1) {
+      this.main.seek(t);
+      return;
+    }
     this.main.pause();
     this.main.seek(t);
     this.lead.seek(t);
@@ -494,13 +501,14 @@ export class DualTransport implements Transport {
       }
       return;
     }
-    if (!this.main.playing() || !this.lead.playing()) return;
-    if (gap < this.ahead - 3) {
-      this.waiting = 'main';
-      this.main.pause();
-    } else if (gap > this.ahead + 3) {
+    // judged on the clocks, not on "playing": during an ad or buffering a player can report
+    // playing while its time stands still, and the other one runs away
+    if (gap > this.ahead + 3 && this.lead.playing()) {
       this.waiting = 'lead';
       this.lead.pause();
+    } else if (gap < this.ahead - 3 && this.main.playing() && !this.lead.ended()) {
+      this.waiting = 'main';
+      this.main.pause();
     }
   }
   /** True while one player waits for the other (shown as "buffering"). */

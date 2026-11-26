@@ -101,6 +101,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   const backing = ytAny && ext.present && ext.consent && wantBacking;
   const [backingFailed, setBackingFailed] = useState(false);
   const [diagOpen, setDiagOpen] = useState(false);
+  const [drag, setDrag] = useState<number | null>(null);
   const [diagCopied, setDiagCopied] = useState(false);
   const [countdown, setCountdown] = useState(0);
   const mainSince = useRef(0);
@@ -228,8 +229,12 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
     const id = window.setInterval(() => {
       const tr = transport.current;
       if (!(tr instanceof DualTransport)) return;
+      // the classic vocal cut needs almost no head start; the AI needs its full window
+      tr.ahead = extRef.current.status?.mode === 'ai' || extRef.current.status?.state === 'loading' ? LEAD : 2;
       tr.keepAhead();
-      extPost({ type: 'clock', t: tr.time(), playing: tr.playing() && !tr.syncing() }); // MV time, same clock as the tapped audio
+      // the backing follows the picture: while the picture plays, so does the backing (even if the
+      // lead is waiting for it to catch up: what the picture needs is already in the buffer)
+      extPost({ type: 'clock', t: tr.time(), playing: tr.playing() });
       // safety net: the picture has been playing for 6 s and the extension still hears nothing
       if (tr.playing() && !tr.solo) {
         if (!mainSince.current) mainSince.current = performance.now();
@@ -778,16 +783,22 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
               >
                 {hud.playing ? t('stage.pause') : t('stage.resume')}
               </button>
+              {!isDemo && (<>
               <input
                 className="seek"
                 type="range"
                 min={0}
                 max={Math.max(1, Math.floor(hud.dur))}
                 step={1}
-                value={Math.floor(hud.time)}
+                value={drag ?? Math.floor(hud.time)}
                 aria-label={t('stage.seek')}
-                onChange={(e) => seekTo(Number(e.target.value))}
+                // while dragging the slider shows where you are going; the jump happens on release
+                onChange={(e) => setDrag(Number(e.target.value))}
+                onPointerUp={() => drag !== null && (seekTo(drag), setDrag(null))}
+                onKeyUp={() => drag !== null && (seekTo(drag), setDrag(null))}
+                onBlur={() => setDrag(null)}
               />
+              {drag !== null && <small className="muted">→ {fmt(drag)}</small>}
               <div className="row wrap">
                 <button className="btn small" onClick={() => seekTo(hud.time - 10)}>
                   ⏪ 10
@@ -801,6 +812,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
                   </button>
                 )}
               </div>
+              </>)}
               <button className="btn" onClick={restart}>
                 {t('stage.restart')}
               </button>
