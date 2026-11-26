@@ -101,7 +101,7 @@ export class LiveNotes {
    * Where the lyrics belong: the shift (media = line time + shift) that puts the most singing inside
    * the lyric lines and the least outside. Frames we have not heard yet count for nothing.
    */
-  alignOffset(lines: { start: number; end: number }[], range = 40): { off: number; voiced: number } | null {
+  alignOffset(lines: { start: number; end: number }[], range = 40): { off: number; voiced: number; conf: number } | null {
     if (!lines.length || !this.frames.size) return null;
     const h = this.hop;
     let kMin = Infinity;
@@ -152,6 +152,7 @@ export class LiveNotes {
     const heardTo = (kMax + 1) * h;
     let best = -Infinity;
     let off = 0;
+    const scores: [number, number][] = [];
     for (let o = -range; o <= range; o += 0.1) {
       let sc = 0;
       for (const l of lines) {
@@ -160,12 +161,17 @@ export class LiveNotes {
         const ts = l.start + o;
         if (ts > heardFrom && ts < heardTo && near(ts) < 0.3) sc += 25;
       }
+      scores.push([o, sc]);
       if (sc > best + 1e-9) {
         best = sc;
         off = o;
       }
     }
-    return { off: Math.round(off * 10) / 10, voiced: voiced * h };
+    // how clearly the best beats any answer more than 2 s away (1 = no better than a guess)
+    let second = 0;
+    for (const [o, sc] of scores) if (Math.abs(o - off) > 2 && sc > second) second = sc;
+    const conf = second > 0 ? best / second : best > 0 ? 9 : 0;
+    return { off: Math.round(off * 10) / 10, voiced: voiced * h, conf };
   }
 
   /**
@@ -183,6 +189,8 @@ export class LiveNotes {
       if (v !== null || n) ts.push(k * h);
     }
     if (ts.length * h < 0.4) return null;
+    // "singing" with no breath at all over a whole line is leaked music, not a voice: do not trust it
+    if (ts.length * h > (b - a) * 0.92 && b - a > 3) return null;
     const chars = [...text];
     const units = chars.filter((c) => c.trim()).length || 1;
     const out: { start: number; end: number; text: string }[] = [];

@@ -15,6 +15,7 @@ import { LiveNotes } from '../core/liveNotes';
 import { ExtUpdate } from './ExtUpdate';
 import { Prep } from './Prep';
 import { cheer } from './cheers';
+import { playSfx, SFX, type SfxKind } from '../audio/sfx';
 import { findLyrics } from '../core/lyricsSearch';
 import { loadPitch, savePitch } from '../core/songCache';
 import { drawDualLane, meanOffset, type DualState } from './dualLane';
@@ -115,7 +116,8 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   const [hq, setHq] = useState(false);
   // the guide vocal: the original kept faintly under the backing, at the singer's own level
   const [guideLvl, setGuideLvl] = useState(() => Number(localStorage.getItem('urktv.guide')) || 0.25);
-  const [hqAsk, setHqAsk] = useState(false); // high quality is a second step: it can mean a long wait
+  const [hqAsk, setHqAsk] = useState(false);
+  const [voiceFx, setVoiceFx] = useState(0); // voice changer for the monitor (semitones) // high quality is a second step: it can mean a long wait
   const hqRef = useRef(hq);
   hqRef.current = hq;
   // any YouTube song can get the live backing track: library songs, and links pasted on Home
@@ -374,7 +376,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
       if (manualLyrics.current) return;
       const lines = chart.lines.filter((l) => l.text.trim()).map((l) => ({ start: l.start, end: Math.min(l.end, l.start + sungDur(l.text)) }));
       const r = liveNotes.current.alignOffset(lines, 60);
-      if (!r || r.voiced < 12) return;
+      if (!r || r.voiced < 12 || r.conf < 1.15) return; // not clear yet: leave the lyrics where they are
       // settled: three answers in a row agree with plenty heard -> stop moving the lyrics
       const hist = alignHist.current;
       hist.push(r.off);
@@ -1083,6 +1085,67 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
                   </a>
                 </p>
               )}
+            </div>
+          )}
+          {(ytAny || own) && phase === 'live' && (
+            <div className="ktv-tools">
+              <div className="tool-group" title="男生唱女生的歌按男調，女生唱男生的歌按女調">
+                <span className="tool-label">調性</span>
+                {(
+                  [
+                    ['♂ 男調', -5],
+                    ['原調', 0],
+                    ['♀ 女調', 5],
+                  ] as const
+                ).map(([label, k]) => (
+                  <button
+                    key={label}
+                    className={'chip-btn' + (key === k ? ' on' : '')}
+                    disabled={!backing && !own}
+                    onClick={() => (own ? changeKey(k) : changeLiveKey(k))}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="tool-group">
+                <span className="tool-label">氣氛</span>
+                {(Object.keys(SFX) as SfxKind[]).map((k) => (
+                  <button
+                    key={k}
+                    className="chip-btn sfx"
+                    title={SFX[k].label}
+                    onClick={() => {
+                      playSfx(k);
+                      pop(`${SFX[k].icon} ${SFX[k].label}`, 'praise');
+                    }}
+                  >
+                    {SFX[k].icon}
+                  </button>
+                ))}
+              </div>
+              <div className="tool-group" title="聽自己的聲音時變聲（建議戴耳機）">
+                <span className="tool-label">變聲</span>
+                {(
+                  [
+                    ['本人', 0],
+                    ['🐿️ 可愛', 7],
+                    ['👹 怪獸', -6],
+                  ] as const
+                ).map(([label, v]) => (
+                  <button
+                    key={label}
+                    className={'chip-btn' + (voiceFx === v ? ' on' : '')}
+                    onClick={() => {
+                      setVoiceFx(v);
+                      mic.current.setVoice(v);
+                      if (v !== 0 && !cfg.monitor) setCfg({ monitor: true });
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
           {hqAsk && (

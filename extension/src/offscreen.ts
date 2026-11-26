@@ -78,32 +78,58 @@ const S = {
 const PR = RATE / 2; // pitch runs at half rate (cheaper, plenty for a voice)
 const PF = 1024;
 const PH = 512;
-const P = { buf: new Float32Array(0), t: 0 };
-function pitchFeed(t: number, voc: Float32Array[]) {
+const P = { buf: new Float32Array(0), ibuf: new Float32Array(0), t: 0 };
+const down = (ch: Float32Array[]) => {
+  const n = ch[0].length >> 1;
+  const m = new Float32Array(n);
+  const a = ch[0];
+  const b = ch[1] ?? ch[0];
+  for (let i = 0; i < n; i++) m[i] = (a[2 * i] + a[2 * i + 1] + b[2 * i] + b[2 * i + 1]) / 4;
+  return m;
+};
+const cat = (x: Float32Array, y: Float32Array) => {
+  const c = new Float32Array(x.length + y.length);
+  c.set(x);
+  c.set(y, x.length);
+  return c;
+};
+/** Pitch of the separated vocal, only where it really is singing: louder than what leaked in from the music. */
+function pitchFeed(t: number, voc: Float32Array[], inst?: Float32Array[]) {
   const n = voc[0].length >> 1;
   if (!n) return;
-  const mono = new Float32Array(n);
-  const a = voc[0];
-  const b = voc[1] ?? voc[0];
-  for (let i = 0; i < n; i++) mono[i] = (a[2 * i] + a[2 * i + 1] + b[2 * i] + b[2 * i + 1]) / 4;
+  const mono = down(voc);
+  const im = inst ? down(inst) : new Float32Array(n);
   const end = P.t + P.buf.length / PR;
   if (!P.buf.length || Math.abs(t - end) > 0.05) {
     P.buf = mono;
+    P.ibuf = im;
     P.t = t;
   } else {
-    const c = new Float32Array(P.buf.length + n);
-    c.set(P.buf);
-    c.set(mono, P.buf.length);
-    P.buf = c;
+    P.buf = cat(P.buf, mono);
+    P.ibuf = cat(P.ibuf, im);
   }
   const midi: (number | null)[] = [];
   let pos = 0;
   for (; pos + PF <= P.buf.length; pos += PH) {
-    const r = detectPitch(P.buf.subarray(pos, pos + PF), PR, 0.9, 0.006);
-    midi.push(r ? Math.round(freqToMidi(r.freq) * 10) / 10 : null);
+    const w = P.buf.subarray(pos, pos + PF);
+    let ve = 0;
+    let ie = 0;
+    for (let k = 0; k < PF; k += 2) {
+      ve += w[k] * w[k];
+      ie += P.ibuf[pos + k] * P.ibuf[pos + k];
+    }
+    // an intro or interlude: what is in the "vocal" is music that leaked through, not a voice
+    if (inst && ve < 0.18 * ie) {
+      midi.push(null);
+      continue;
+    }
+    const r = detectPitch(w, PR, 0.9, 0.008);
+    // a voice sits between about E2 and C6
+    midi.push(r && r.freq > 80 && r.freq < 1050 ? Math.round(freqToMidi(r.freq) * 10) / 10 : null);
   }
   if (midi.length) toPage({ type: 'pitch', t: P.t + PF / 2 / PR, hop: PH / PR, midi });
   P.buf = P.buf.slice(pos);
+  P.ibuf = P.ibuf.slice(pos);
   P.t += pos / PR;
 }
 
@@ -431,7 +457,7 @@ async function liteStep(): Promise<boolean | 'stale'> {
   applyGains();
   const t = S.t0 + r0 / RATE;
   S.segs.push({ t, inst, voc });
-  pitchFeed(t, voc);
+  pitchFeed(t, voc, inst);
   S.lf += NEW;
   S.done = (f0 + NEW) * LH;
   return true;
@@ -524,7 +550,7 @@ async function work() {
         if (inst[0].length) {
           const st = S.t0 + (S.len - inst[0].length - lag) / RATE;
           S.segs.push({ t: st, inst, voc });
-          pitchFeed(st, voc);
+          pitchFeed(st, voc, inst);
         }
         void n0;
         break;
@@ -574,7 +600,7 @@ async function work() {
       const inst = cfg.primary === 'instrumental' ? prim : other;
       const voc = cfg.primary === 'instrumental' ? other : prim;
       S.segs.push({ t: S.t0 + S.done / RATE, inst, voc });
-      pitchFeed(S.t0 + S.done / RATE, voc);
+      pitchFeed(S.t0 + S.done / RATE, voc, inst);
       S.done += gen;
       if (S.mode === 'auto' && S.speed < 1.05) {
         S.using = 'classic'; // this computer cannot keep up: fall back
@@ -703,6 +729,7 @@ chrome.runtime.onMessage.addListener((m: any, _s: unknown, reply: (x: unknown) =
   } else if (msg.type === 'start') {
     S.running = true;
     P.buf = new Float32Array(0);
+    P.ibuf = new Float32Array(0);
     S.blocks = 0;
     S.played = 0;
     S.resets = 0;

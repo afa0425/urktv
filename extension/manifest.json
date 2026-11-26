@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "URKTV 即時伴奏",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "在你自己的電腦上，把 URKTV 正在播放的 MV 即時去人聲，產生伴奏給你唱。聲音只在這台電腦處理，不會上傳、不會存檔。",
   "permissions": [
     "offscreen",

@@ -65,6 +65,16 @@ export class MicPitch {
     const wet = ctx.createGain();
     src.connect(mon);
     mon.connect(ctx.destination);
+    // voice changer for what you hear of yourself (chipmunk / monster): a key shifter in front
+    this.src = src;
+    this.monIn = mon;
+    void ctx.audioWorklet
+      ?.addModule(new URL('pitch-worklet.js', document.baseURI).href)
+      .then(() => {
+        this.shifter = new AudioWorkletNode(ctx, 'key-shift', { outputChannelCount: [2] });
+        this.setVoice(this.voice);
+      })
+      .catch(() => {});
     mon.connect(delay);
     delay.connect(lp);
     lp.connect(fb);
@@ -75,6 +85,29 @@ export class MicPitch {
     this.echoWet = wet;
     this.howl = false;
     this.applyMonitor();
+  }
+
+  private src: MediaStreamAudioSourceNode | null = null;
+  private monIn: GainNode | null = null;
+  private shifter: AudioWorkletNode | null = null;
+  private voice = 0;
+  /** Voice changer (semitones) for the monitor: 0 = your own voice. */
+  setVoice(semitones: number) {
+    this.voice = semitones;
+    if (!this.src || !this.monIn || !this.shifter || !this.ctx) return;
+    try {
+      this.src.disconnect(this.monIn);
+    } catch {}
+    try {
+      this.src.disconnect(this.shifter);
+      this.shifter.disconnect();
+    } catch {}
+    if (semitones === 0) this.src.connect(this.monIn);
+    else {
+      this.src.connect(this.shifter);
+      this.shifter.connect(this.monIn);
+      this.shifter.parameters.get('ratio')!.setValueAtTime(Math.pow(2, semitones / 12), this.ctx.currentTime);
+    }
   }
 
   /** How you hear yourself. Off by default in the browser; the stage turns it on from settings. */

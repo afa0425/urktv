@@ -1986,3 +1986,44 @@ a.btn {
 .chat-list p { margin: 0; }
 .chat-list b { color: var(--accent2); margin-right: 4px; }
 .member-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 4px; font-size: 0.9rem; }
+.ktv-tools {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 16px;
+  margin-top: 8px;
+}
+.tool-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.tool-label {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin: 0 4px;
+}
+.chip-btn {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  border-radius: 99px;
+  padding: 4px 10px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.1s, background 0.2s;
+}
+.chip-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.12); }
+.chip-btn:active:not(:disabled) { transform: scale(1.12); }
+.chip-btn.on {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #1a0f16;
+  border-color: transparent;
+}
+.chip-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.chip-btn.sfx { font-size: 1.1rem; padding: 2px 8px; }
