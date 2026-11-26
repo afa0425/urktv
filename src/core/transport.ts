@@ -137,6 +137,10 @@ export class YouTubeTransport implements Transport {
   seek(t: number) {
     this.player?.seekTo?.(t, true);
   }
+  setMuted(m: boolean) {
+    if (m) this.player?.mute?.();
+    else this.player?.unMute?.();
+  }
   destroy() {
     this.dead = true;
     try {
@@ -437,7 +441,7 @@ export class DualTransport implements Transport {
   }
   play() {
     this.waiting = null;
-    this.lead.play();
+    if (!this.solo) this.lead.play();
     this.main.play();
   }
   pause() {
@@ -446,15 +450,35 @@ export class DualTransport implements Transport {
     this.lead.pause();
     this.main.pause();
   }
+  /**
+   * Jump: both players go to t; the lead plays from there and the picture waits until the lead is
+   * `ahead` seconds in again (the AI needs that audio before the picture gets there).
+   */
   seek(t: number) {
+    t = Math.max(0, t);
+    if (this.solo) return this.main.seek(t);
+    this.main.pause();
     this.main.seek(t);
-    this.lead.seek(t + this.ahead);
+    this.lead.seek(t);
+    this.lead.play();
+    this.waiting = 'main';
+  }
+  /** The backing track never arrived: drop the lead and let the MV play with its own sound. */
+  solo = false;
+  fallbackToOriginal() {
+    this.solo = true;
+    this.waiting = null;
+    window.clearInterval(this.timer);
+    this.lead.pause();
+    this.main.setMuted(false);
+    this.main.play();
   }
   /**
    * Keep the lead in front without seeking it (every seek throws away the AI's work): if the lead
    * falls behind (buffering), the picture waits for it; if the picture falls behind, the lead waits.
    */
   keepAhead() {
+    if (this.solo) return;
     const gap = this.lead.time() - this.main.time();
     if (this.waiting === 'main') {
       if (gap >= this.ahead - 0.3) {

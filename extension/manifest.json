@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "URKTV 即時伴奏",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "在你自己的電腦上，把 URKTV 正在播放的 MV 即時去人聲，產生伴奏給你唱。聲音只在這台電腦處理，不會上傳、不會存檔。",
   "permissions": [
     "offscreen",
@@ -11,7 +11,8 @@
     "https://urktv.afa0425.workers.dev/*",
     "https://www.youtube.com/*",
     "https://www.youtube-nocookie.com/*",
-    "http://localhost/*"
+    "http://localhost/*",
+    "http://127.0.0.1/*"
   ],
   "background": {
     "service_worker": "background.js",
@@ -32,7 +33,8 @@
       "matches": [
         "https://www.youtube.com/embed/*",
         "https://www.youtube-nocookie.com/embed/*",
-        "http://localhost/*"
+        "http://localhost/*",
+        "http://127.0.0.1/*"
       ],
       "js": [
         "tap.js"

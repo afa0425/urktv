@@ -1,8 +1,8 @@
 <!doctype html><html><head><meta charset="utf-8"><title>extension test</title></head>
 <body style="background:#111;color:#eee;font:14px sans-serif">
 <!-- Dev test only: two players like the real stage (lead small, main muted), driven like the site does. -->
-<iframe id="lead" src="exttest-embed.html?muted=0" width="200" height="200"></iframe>
-<iframe id="main" src="exttest-embed.html?muted=1" width="480" height="270"></iframe>
+<iframe id="lead" allow="autoplay" src="http://127.0.0.1:4174/exttest-embed.html?muted=0" width="200" height="200"></iframe>
+<iframe id="main" allow="autoplay" src="http://127.0.0.1:4174/exttest-embed.html?muted=1" width="480" height="270"></iframe>
 <pre id="log"></pre>
 <script>
   const log = (s) => (document.getElementById('log').textContent += s + '\n');
@@ -14,11 +14,12 @@
   window.runTest = async (mode, lead) => {
     post({ type: 'consent', ok: true });
     post({ type: 'start', lead, vocal: 0, mode, modelUrl: location.origin + '/models/UVR_MDXNET_KARA_2.onnx', ortBase: '', model: 'kara2' });
-    const L = document.getElementById('lead').contentDocument.getElementById('v');
-    const M = document.getElementById('main').contentDocument.getElementById('v');
-    await L.play();
-    setTimeout(() => M.play(), lead * 1000);
-    setInterval(() => post({ type: 'clock', t: M.currentTime, playing: !M.paused && M.currentTime > 0 }), 200);
+    const L = document.getElementById('lead').contentWindow, M = document.getElementById('main').contentWindow;
+    let mt = 0, mp = false;
+    window.addEventListener('message', (e) => { if (e.data && e.data.frame === 'main') { mt = e.data.t; mp = e.data.playing; } });
+    L.postMessage({ cmd: 'play' }, '*');
+    setTimeout(() => M.postMessage({ cmd: 'play' }, '*'), lead * 1000);
+    setInterval(() => post({ type: 'clock', t: mt, playing: mp }), 200);
   };
   post({ type: 'hello' });
 </script>

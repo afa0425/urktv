@@ -55,6 +55,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const leadRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const ktvRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const transport = useRef<Transport | null>(null);
   const mic = useRef(new MicPitch());
@@ -94,8 +95,15 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   // with the URKTV extension (computer Chrome) the MV's vocal is removed on this computer, live
   const ext = useExtension();
   const [wantBacking, setWantBacking] = useState(true);
-  const backing = ytCat && ext.present && ext.consent && wantBacking;
+  // any YouTube song can get the live backing track: library songs, and links pasted on Home
+  const ytPlain = !own && !isDemo;
+  const ytAny = ytCat || ytPlain;
+  const backing = ytAny && ext.present && ext.consent && wantBacking;
+  const [backingFailed, setBackingFailed] = useState(false);
   const [countdown, setCountdown] = useState(0);
+  const mainSince = useRef(0);
+  const extRef = useRef(ext);
+  extRef.current = ext;
 
   // Values the animation loop reads without restarting.
   const live = useRef({ chart, offset: 0, transpose: 0, latency: 0, title, layered: local as Layered | null });
@@ -158,6 +166,12 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
           new YouTubeTransport(leadRef.current!, local!.video!.id, { onError: ytErrCb }),
           LEAD,
         )
+      : ytPlain && backing
+      ? new DualTransport(
+          new YouTubeTransport(host, song.id, { muted: true, onError: ytErrCb, onTitle: (name) => setTitle(name) }),
+          new YouTubeTransport(leadRef.current!, song.id, { onError: ytErrCb }),
+          LEAD,
+        )
       : plain
       ? new YouTubeTransport(host, local!.video!.id, {
           onError: (code) =>
@@ -214,6 +228,16 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
       if (!(tr instanceof DualTransport)) return;
       tr.keepAhead();
       extPost({ type: 'clock', t: tr.time(), playing: tr.playing() && !tr.syncing() }); // MV time, same clock as the tapped audio
+      // safety net: the picture has been playing for 6 s and the extension still hears nothing
+      if (tr.playing() && !tr.solo) {
+        if (!mainSince.current) mainSince.current = performance.now();
+        const blocks = Number((extRef.current.status?.diag as any)?.blocks ?? 0);
+        if (blocks === 0 && performance.now() - mainSince.current > 6000) {
+          tr.fallbackToOriginal();
+          extPost({ type: 'stop' });
+          setBackingFailed(true);
+        }
+      }
     }, 200);
     return () => window.clearInterval(id);
   }, [phase, backing, local]);
@@ -419,6 +443,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
         }
       }
 
+      ktvRef.current?.style.setProperty('--t', String(time - L.offset));
       const ctx = cv.getContext('2d')!;
       const dpr = cv.width / Math.max(1, cv.clientWidth);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -505,6 +530,26 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
     setPhase('live');
   };
 
+  /** Jump in the song (also over the intro). Scoring then counts only the notes you reached. */
+  const seekTo = (t: number) => {
+    const tr = transport.current;
+    if (!tr) return;
+    const d = tr.duration() || 0;
+    const to = Math.max(0, d ? Math.min(t, d - 1) : t);
+    tr.seek(to + (live.current.offset || 0) * 0);
+    trace.current = [];
+    if (scorer.current instanceof GuideScorer) scorer.current.skipped = true;
+    const notes = live.current.chart?.notes ?? [];
+    const tc = to - live.current.offset;
+    coach.current.idx = Math.max(0, notes.findIndex((n) => n.end >= tc));
+    coach.current.combo = 0;
+  };
+  const firstVoice = () => {
+    const c = live.current.chart;
+    const first = c?.lines[0]?.start ?? c?.notes[0]?.start;
+    return first !== undefined ? Math.max(0, first + live.current.offset - 3) : null;
+  };
+
   const restart = () => {
     setPhase('ready');
     setHud((h) => ({ ...h, score: 0, time: 0, playing: false }));
@@ -538,8 +583,13 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   // lyrics
   const tl = hud.time - live.current.offset;
   const li = chart ? lineAt(chart.lines, tl) : -1;
-  const cur = li >= 0 ? chart!.lines[li] : null;
-  const nxt = li >= 0 ? chart!.lines[li + 1] : null;
+  /** KTV rows: even lines on the top row (left), odd lines on the bottom row (right); each row shows
+   *  its line until it has been sung, then the next one of its parity. */
+  const ktvLine = (row: number) => {
+    if (!chart) return -1;
+    for (let j = row; j < chart.lines.length; j += 2) if (chart.lines[j].end > tl - 0.4) return j;
+    return -1;
+  };
 
   return (
     <div className="stage">
@@ -574,20 +624,29 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
           </div>
 
           {countdown > 0 && <div className="notice ok countdown">🎛️ {t('ext.countdown', { n: countdown })}</div>}
-          <div className="lyrics" aria-live="off">
-            {cur ? (
-              <>
-                <p className="lyric-cur">
-                  {cur.parts.length
-                    ? cur.parts.map((p, k) => (
-                        <span key={k} className={tl >= p.end ? 'sung' : tl >= p.start ? 'singing' : ''}>
+          <div className="ktv" ref={ktvRef} aria-live="off">
+            {chart && chart.lines.length > 0 ? (
+              [0, 1].map((row) => {
+                const j = ktvLine(row);
+                const line = j >= 0 ? chart.lines[j] : null;
+                const prevEnd = j > 0 ? chart.lines[j - 1].end : -99;
+                const dots = line && line.start - tl > 0 && line.start - tl <= 3 && line.start - prevEnd > 2 ? Math.ceil(line.start - tl) : 0;
+                return (
+                  <p key={row} className={'ktv-row ' + (row ? 'r' : 'l') + (j === li ? ' now' : '')}>
+                    {dots > 0 && <span className="ktv-dots">{'●'.repeat(dots)}</span>}
+                    {line &&
+                      (line.parts.length ? line.parts : [{ start: line.start, end: line.end, text: line.text }]).map((p, k) => (
+                        <span
+                          key={k}
+                          className="ktv-ch"
+                          style={{ ['--s' as string]: p.start, ['--d' as string]: Math.max(0.05, p.end - p.start) } as React.CSSProperties}
+                        >
                           {p.text}
                         </span>
-                      ))
-                    : cur.text}
-                </p>
-                <p className="lyric-next">{nxt?.text ?? ''}</p>
-              </>
+                      ))}
+                  </p>
+                );
+              })
             ) : (
               <p className="lyric-next">{chart ? '♪' : ''}</p>
             )}
@@ -628,9 +687,10 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
             </div>
           </div>
 
-          {ytCat && (
+          {ytAny && (
             <div className="card col">
               <div className="label">{t('ext.title')}</div>
+              {backingFailed && <p className="notice warn">{t('ext.failed')}</p>}
               {!ext.present && (
                 <p className="muted small">
                   {t('ext.install')}{' '}
@@ -705,6 +765,29 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
               >
                 {hud.playing ? t('stage.pause') : t('stage.resume')}
               </button>
+              <input
+                className="seek"
+                type="range"
+                min={0}
+                max={Math.max(1, Math.floor(hud.dur))}
+                step={1}
+                value={Math.floor(hud.time)}
+                aria-label={t('stage.seek')}
+                onChange={(e) => seekTo(Number(e.target.value))}
+              />
+              <div className="row wrap">
+                <button className="btn small" onClick={() => seekTo(hud.time - 10)}>
+                  ⏪ 10
+                </button>
+                <button className="btn small" onClick={() => seekTo(hud.time + 10)}>
+                  10 ⏩
+                </button>
+                {firstVoice() !== null && hud.time < (firstVoice() ?? 0) && (
+                  <button className="btn small" onClick={() => seekTo(firstVoice()!)}>
+                    {t('stage.skipIntro')}
+                  </button>
+                )}
+              </div>
               <button className="btn" onClick={restart}>
                 {t('stage.restart')}
               </button>

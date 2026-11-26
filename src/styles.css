@@ -1060,3 +1060,53 @@ a.btn {
   max-height: 220px;
   overflow: auto;
 }
+
+/* KTV lyrics: two rows, left/right, each character wipes from white to colour as it is sung */
+.ktv {
+  --t: -1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 4px;
+  min-height: 6.2em;
+}
+.ktv-row {
+  margin: 0;
+  font-size: clamp(1.25rem, 3.2vw, 2rem);
+  font-weight: 900;
+  line-height: 1.35;
+  letter-spacing: 0.04em;
+  white-space: pre-wrap;
+  min-height: 1.35em;
+}
+.ktv-row.l {
+  text-align: left;
+  padding-right: 12%;
+}
+.ktv-row.r {
+  text-align: right;
+  padding-left: 12%;
+}
+.ktv-row:not(.now) {
+  opacity: 0.82;
+}
+.ktv-ch {
+  --f: clamp(0, calc((var(--t) - var(--s)) / var(--d)), 1);
+  background-image: linear-gradient(90deg, #ff4f86 0%, #ffb347 100%), linear-gradient(90deg, #ffffff, #ffffff);
+  background-size: calc(var(--f) * 100%) 100%, 100% 100%;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 1px #000) drop-shadow(0 2px 3px rgba(0, 0, 0, 0.7));
+}
+.ktv-dots {
+  color: #ffb347;
+  font-size: 0.6em;
+  letter-spacing: 0.25em;
+  margin-right: 0.5em;
+  vertical-align: middle;
+}
+.seek {
+  width: 100%;
+}

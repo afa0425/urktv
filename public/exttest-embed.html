@@ -4,5 +4,8 @@
 <script>
   const v = document.getElementById('v');
   v.muted = new URLSearchParams(location.search).get('muted') === '1';
+  const name = v.muted ? 'main' : 'lead';
+  window.addEventListener('message', (e) => { if (e.data && e.data.cmd === 'play') v.play().catch((err) => parent.postMessage({ frame: name, err: String(err) }, '*')); });
+  setInterval(() => parent.postMessage({ frame: name, t: v.currentTime, playing: !v.paused }, '*'), 200);
 </script>
 </body></html>

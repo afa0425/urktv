@@ -141,6 +141,9 @@ export class GuideScorer extends Base {
     return max > 0 ? (100 * got) / max : 0;
   }
 
+  /** After a jump in the song, the result only counts the notes that were actually reached. */
+  skipped = false;
+
   result(): ScoreResult {
     let notesHit = 0;
     let notes = 0;
@@ -148,6 +151,7 @@ export class GuideScorer extends Base {
     let goldenMax = 0;
     this.chart.notes.forEach((n, i) => {
       if (n.kind === 'free') return;
+      if (this.skipped && this.seen[i] === 0) return;
       notes++;
       if (this.ratio(i) >= 0.5) notesHit++;
       if (n.kind === 'golden') {
@@ -155,7 +159,7 @@ export class GuideScorer extends Base {
         golden += this.ratio(i);
       }
     });
-    const raw = this.total(false);
+    const raw = this.total(this.skipped);
     const score = friendly(raw);
     const parts: ScorePart[] = [
       { key: 'pitch', value: raw / 100 },
