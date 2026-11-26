@@ -2,6 +2,7 @@
 // (muted) player, and plays it in time with that player. Runs only on this computer; nothing is stored.
 import * as ort from 'onnxruntime-web/webgpu';
 import { MODELS, _Spectral, type MdxConfig } from '../../src/separate/mdx';
+import { FFT } from '../../src/separate/fft';
 import { decode16, type PageMsg, type TapBlock } from './protocol';
 
 const RATE = 44100;
@@ -45,6 +46,7 @@ const toPage = (msg: unknown) => chrome.runtime.sendMessage({ to: 'page', msg })
 
 function reset(t: number) {
   S.resets++;
+  classicReset();
   S.t0 = t;
   S.len = 0;
   S.done = 0;
@@ -69,23 +71,111 @@ function append(t: number, l: Float32Array, r: Float32Array) {
   S.len += l.length;
 }
 
-/** Classic karaoke: keep the sides and the bass, cancel what sits in the centre (the lead vocal). */
+/**
+ * Classic karaoke, done per frequency (better than plain L-R): in every time-frequency cell, sound
+ * that is identical in both channels (the lead vocal sits in the centre) is removed, but only in the
+ * voice band, so bass, kick and cymbals stay. Streaming STFT, 2048-point, 75 % overlap.
+ */
+const CN = 2048;
+const CH = 512;
+const cWin = new Float64Array(CN).map((_, i) => 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / CN));
+const cFft = new FFT(CN);
+const C = {
+  inL: new Float32Array(CN), // the last CN samples, for the frame that straddles blocks
+  inR: new Float32Array(CN),
+  fill: 0, // samples in inL/inR not yet framed (counted from the end of the history)
+  olaL: new Float64Array(CN * 2),
+  olaR: new Float64Array(CN * 2),
+  olaV: [new Float64Array(CN * 2), new Float64Array(CN * 2)],
+};
+const LOW = Math.round((150 / RATE) * CN);
+const HIGH = Math.round((7000 / RATE) * CN);
+
+function classicReset() {
+  C.inL.fill(0);
+  C.inR.fill(0);
+  C.fill = 0;
+  C.olaL.fill(0);
+  C.olaR.fill(0);
+  C.olaV.forEach((a) => a.fill(0));
+}
+
 function classic(l: Float32Array, r: Float32Array) {
-  const n = l.length;
-  const inst = [new Float32Array(n), new Float32Array(n)];
-  const voc = [new Float32Array(n), new Float32Array(n)];
-  let lp = 0;
-  const a = Math.exp((-2 * Math.PI * 140) / RATE); // keep bass below ~140 Hz from the mid
-  for (let i = 0; i < n; i++) {
-    const mid = (l[i] + r[i]) / 2;
-    const side = (l[i] - r[i]) / 2;
-    lp = a * lp + (1 - a) * mid;
-    inst[0][i] = side + lp;
-    inst[1][i] = -side + lp;
-    voc[0][i] = l[i] - inst[0][i];
-    voc[1][i] = r[i] - inst[1][i];
+  const outL: number[] = [];
+  const outR: number[] = [];
+  const vL: number[] = [];
+  const vR: number[] = [];
+  const re = [new Float64Array(CN), new Float64Array(CN)];
+  const im = [new Float64Array(CN), new Float64Array(CN)];
+  for (let i = 0; i < l.length; i++) {
+    // shift one sample into the history
+    C.inL.copyWithin(0, 1);
+    C.inR.copyWithin(0, 1);
+    C.inL[CN - 1] = l[i];
+    C.inR[CN - 1] = r[i];
+    if (++C.fill < CH) continue;
+    C.fill = 0;
+    // one frame
+    for (let k = 0; k < CN; k++) {
+      re[0][k] = C.inL[k] * cWin[k];
+      re[1][k] = C.inR[k] * cWin[k];
+      im[0][k] = 0;
+      im[1][k] = 0;
+    }
+    cFft.transform(re[0], im[0]);
+    cFft.transform(re[1], im[1]);
+    const cRe = new Float64Array(CN);
+    const cIm = new Float64Array(CN);
+    for (let k = LOW; k <= HIGH; k++) {
+      const lr = re[0][k], li = im[0][k], rr = re[1][k], ri = im[1][k];
+      const pl = lr * lr + li * li;
+      const pr = rr * rr + ri * ri;
+      const cross = Math.hypot(lr * rr + li * ri, li * rr - lr * ri);
+      const sim = pl + pr > 1e-12 ? (2 * cross) / (pl + pr) : 0; // 1 = same in both channels
+      const w = Math.min(1, Math.max(0, (sim - 0.55) / 0.4)) ** 2;
+      const mr = ((lr + rr) / 2) * w;
+      const mi = ((li + ri) / 2) * w;
+      cRe[k] = mr;
+      cIm[k] = mi;
+      if (k > 0) {
+        cRe[CN - k] = mr;
+        cIm[CN - k] = -mi;
+      }
+    }
+    // backing = each channel minus the centre; vocal = the centre
+    const bL = [new Float64Array(CN), new Float64Array(CN)];
+    const bR = [new Float64Array(CN), new Float64Array(CN)];
+    const vc = [cRe.slice(), cIm.slice()];
+    for (let k = 0; k < CN; k++) {
+      bL[0][k] = re[0][k] - cRe[k];
+      bL[1][k] = im[0][k] - cIm[k];
+      bR[0][k] = re[1][k] - cRe[k];
+      bR[1][k] = im[1][k] - cIm[k];
+    }
+    cFft.transform(bL[0], bL[1], true);
+    cFft.transform(bR[0], bR[1], true);
+    cFft.transform(vc[0], vc[1], true);
+    for (let k = 0; k < CN; k++) {
+      const g = cWin[k] / CN / 1.5; // hann^2 at 75 % overlap sums to 1.5
+      C.olaL[k] += bL[0][k] * g;
+      C.olaR[k] += bR[0][k] * g;
+      C.olaV[0][k] += vc[0][k] * g;
+    }
+    // the first CH samples are complete now
+    for (let k = 0; k < CH; k++) {
+      outL.push(C.olaL[k]);
+      outR.push(C.olaR[k]);
+      vL.push(C.olaV[0][k]);
+      vR.push(C.olaV[0][k]);
+    }
+    C.olaL.copyWithin(0, CH);
+    C.olaR.copyWithin(0, CH);
+    C.olaV[0].copyWithin(0, CH);
+    C.olaL.fill(0, CN * 2 - CH);
+    C.olaR.fill(0, CN * 2 - CH);
+    C.olaV[0].fill(0, CN * 2 - CH);
   }
-  return { inst, voc };
+  return { inst: [Float32Array.from(outL), Float32Array.from(outR)], voc: [Float32Array.from(vL), Float32Array.from(vR)] };
 }
 
 async function loadModel(url: string, base: string, key: string) {
@@ -130,9 +220,13 @@ async function work() {
       if (S.using === 'classic') {
         const n = S.len - S.done;
         if (n < 2048) break;
+        const n0 = S.done;
         const { inst, voc } = classic(S.L.subarray(S.done, S.len), S.R.subarray(S.done, S.len));
-        S.segs.push({ t: S.t0 + S.done / RATE, inst, voc });
         S.done = S.len;
+        // output lags the input by one window: its first sample belongs to time (end - produced - lag)
+        const lag = CN - CH;
+        if (inst[0].length) S.segs.push({ t: S.t0 + (S.len - inst[0].length - lag) / RATE, inst, voc });
+        void n0;
         break;
       }
       // AI: windows of `chunk` samples, keeping `trim` samples of context on each side
@@ -274,6 +368,14 @@ chrome.runtime.onMessage.addListener((m: any) => {
     const jumped = Math.abs(msg.t - nowMedia()) > 0.5;
     if (jumped || msg.playing !== S.clock.playing) unschedule();
     S.clock = { t: msg.t, at: performance.now(), playing: msg.playing };
+  } else if ((msg as any).type === 'setmode') {
+    // the page decided: e.g. too slow for the AI even with a long head start -> classic
+    const m = (msg as any).mode as 'ai' | 'classic';
+    S.mode = m;
+    if (m === 'classic' && S.using === 'ai') {
+      S.using = 'classic';
+      S.done = S.len; // classic continues from the live edge
+    }
   } else if (msg.type === 'vocal') {
     vocGain.gain.setTargetAtTime(msg.level, ctx.currentTime, 0.03);
   } else if (msg.type === 'stop') {

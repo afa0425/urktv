@@ -1125,3 +1125,25 @@ a.btn {
   overflow: auto;
   margin: 0;
 }
+
+.seekbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.seekbar .seek {
+  flex: 1 1 200px;
+}
+.seek-time {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.lyric-nudge {
+  gap: 10px;
+}
+.lyric-src {
+  text-align: center;
+  margin: 0;
+}

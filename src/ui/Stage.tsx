@@ -25,6 +25,29 @@ interface Props {
 const PRAISE = ['好穩！', '太強了！', '停不下來！', '神準！', '這就是實力！', '全場安靜聽你唱！', '專業級！'];
 const LINE_PRAISE = ['這句好聽！', '有味道！', '好穩！', '像原唱一樣！', '這句可以收錄了！'];
 
+/** Synced lyrics for a YouTube title from LRCLIB (free, public). Line timing only. */
+async function findLyrics(videoTitle: string): Promise<{ lrc: string; name: string } | null> {
+  const inner = /[【「《\[](.+?)[】」》\]]/.exec(videoTitle)?.[1];
+  const clean = videoTitle
+    .replace(/[【「《\[(（].*?(official|mv|m\/v|music video|lyric|歌詞|動態|官方|完整版|高音質|ktv|伴奏|karaoke|4k|hd).*?[】」》\])）]/gi, ' ')
+    .replace(/official\s*(music\s*)?video|music video|lyrics? video|\bmv\b|\bm\/v\b|官方|完整版|動態歌詞|歌詞版?|高音質/gi, ' ')
+    .replace(/[|｜]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const queries = [...new Set([clean, inner && `${clean.split(/[-–—]/)[0]} ${inner}`, inner].filter(Boolean) as string[])];
+  for (const q of queries) {
+    try {
+      const r = await fetch('https://lrclib.net/api/search?q=' + encodeURIComponent(q));
+      if (!r.ok) continue;
+      const list = ((await r.json()) as any[]).filter((x) => x.syncedLyrics);
+      if (list.length) return { lrc: list[0].syncedLyrics, name: `${list[0].artistName} – ${list[0].trackName}` };
+    } catch {
+      /* offline or blocked */
+    }
+  }
+  return null;
+}
+
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
 export function Stage({ song, nextTitle, onExit, onDone }: Props) {
@@ -102,9 +125,26 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   const [backingFailed, setBackingFailed] = useState(false);
   const [diagOpen, setDiagOpen] = useState(false);
   const [drag, setDrag] = useState<number | null>(null);
+  const [lyricsNote, setLyricsNote] = useState('');
+  const triedLyrics = useRef('');
+  useEffect(() => {
+    if (!ytPlain || saved || !title || title.startsWith('YouTube · ') || triedLyrics.current === title) return;
+    triedLyrics.current = title;
+    let off = false;
+    findLyrics(title).then((hit) => {
+      if (off) return;
+      if (!hit) return setLyricsNote(t('stage.lyricsNone'));
+      charts.set((c) => (c[song.id] ? c : { ...c, [song.id]: { raw: hit.lrc, kind: 'lrc', offsetMs: 0, transpose: 0 } }));
+      setLyricsNote(t('stage.lyricsFound', { name: hit.name }));
+    });
+    return () => {
+      off = true;
+    };
+  }, [ytPlain, saved, title, song.id]);
   const [diagCopied, setDiagCopied] = useState(false);
   const [countdown, setCountdown] = useState(0);
   const mainSince = useRef(0);
+  const rebuffering = useRef(false);
   const extRef = useRef(ext);
   extRef.current = ext;
 
@@ -230,8 +270,19 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
       const tr = transport.current;
       if (!(tr instanceof DualTransport)) return;
       // the classic vocal cut needs almost no head start; the AI needs its full window
-      tr.ahead = extRef.current.status?.mode === 'ai' || extRef.current.status?.state === 'loading' ? LEAD : 2;
+      const st = extRef.current.status;
+      if (st?.mode === 'classic') tr.ahead = 2;
       tr.keepAhead();
+      if (!tr.solo && mainSince.current) {
+        const b = st?.buffered ?? 99;
+        if (tr.playing() && b < 0.8) {
+          tr.main.pause(); // like a video buffering: wait for the backing instead of singing without it
+          rebuffering.current = true;
+        } else if (rebuffering.current && b > 5) {
+          rebuffering.current = false;
+          tr.main.play();
+        }
+      }
       // the backing follows the picture: while the picture plays, so does the backing (even if the
       // lead is waiting for it to catch up: what the picture needs is already in the buffer)
       extPost({ type: 'clock', t: tr.time(), playing: tr.playing() });
@@ -522,16 +573,44 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
     if (tr instanceof DualTransport) {
       // the lead player starts first; the AI gets LEAD seconds of head start
       const m = MODELS.kara2;
-      extPost({ type: 'start', lead: LEAD, vocal, mode: 'auto', modelUrl: MODEL_BASE + m.file, ortBase: ORT_BASE, model: 'kara2' });
+      extRef.current.fellBack = false;
+      extPost({ type: 'start', lead: LEAD, vocal, mode: 'ai', modelUrl: MODEL_BASE + m.file, ortBase: ORT_BASE, model: 'kara2' });
       let started = false;
-      tr.startStaggered(() => {
-        started = true;
-        setCountdown(0);
-      });
+      // how much backing to prepare before the picture starts: enough that the AI, at this
+      // computer's speed, is never caught up before the end of the song
+      const need = () => {
+        const st = extRef.current.status;
+        const sp = st?.speed ?? 0;
+        if (extRef.current.fellBack) return 2; // the AI is out of the picture: classic needs almost no head start
+        if (!sp) return Infinity; // speed not measured yet (first window still running)
+        if (sp >= 1.15) return 8;
+        const dur = tr.duration() || 300;
+        return Math.min(600, dur * (1 / sp - 1) + 8);
+      };
+      tr.startStaggered(
+        () => {
+          started = true;
+          setCountdown(0);
+        },
+        () => {
+          const st = extRef.current.status;
+          const n = need();
+          // far too slow even with a head start: the classic vocal cut, almost no wait
+          if (n !== Infinity && n > 150 && st?.mode !== 'classic') {
+            extPost({ type: 'setmode', mode: 'classic' });
+            tr.ahead = 2;
+            return false;
+          }
+          tr.ahead = n === Infinity ? LEAD : Math.max(2, n);
+          return (st?.buffered ?? 0) >= Math.min(n, 600) - 0.5 && n !== Infinity;
+        },
+      );
       setCountdown(LEAD);
       const cd = window.setInterval(() => {
         if (started) return window.clearInterval(cd);
-        setCountdown(Math.max(1, Math.ceil(LEAD - tr.lead.time())));
+        const n = need();
+        const b = extRef.current.status?.buffered ?? 0;
+        setCountdown(n === Infinity ? LEAD : Math.max(1, Math.ceil(n - b)));
       }, 250);
     } else tr?.play();
     setPhase('live');
@@ -630,7 +709,49 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
             )}
           </div>
 
+          {phase === 'live' && !isDemo && (
+            <div className="seekbar">
+              <button className="btn small" onClick={() => seekTo(hud.time - 10)} aria-label="-10">
+                ⏪ 10
+              </button>
+              <span className="seek-time">{fmt(drag ?? hud.time)}</span>
+              <input
+                className="seek"
+                type="range"
+                min={0}
+                max={Math.max(1, Math.floor(hud.dur))}
+                step={1}
+                value={drag ?? Math.floor(hud.time)}
+                aria-label={t('stage.seek')}
+                onChange={(e) => setDrag(Number(e.target.value))}
+                onPointerUp={() => drag !== null && (seekTo(drag), setDrag(null))}
+                onKeyUp={() => drag !== null && (seekTo(drag), setDrag(null))}
+                onBlur={() => setDrag(null)}
+              />
+              <span className="seek-time">{fmt(hud.dur)}</span>
+              <button className="btn small" onClick={() => seekTo(hud.time + 10)} aria-label="+10">
+                10 ⏩
+              </button>
+              {firstVoice() !== null && hud.time < (firstVoice() ?? 0) && (
+                <button className="btn small" onClick={() => seekTo(firstVoice()!)}>
+                  {t('stage.skipIntro')}
+                </button>
+              )}
+            </div>
+          )}
+          {lyricsNote && <p className="muted small lyric-src">{lyricsNote}</p>}
           {countdown > 0 && <div className="notice ok countdown">🎛️ {t('ext.countdown', { n: countdown })}</div>}
+          {saved?.kind === 'lrc' && phase === 'live' && (
+            <div className="row center lyric-nudge">
+              <button className="btn small" onClick={() => patchChart({ offsetMs: (saved.offsetMs ?? 0) - 500 })}>
+                {t('stage.lyricsEarlier')}
+              </button>
+              <span className="muted small">{((saved.offsetMs ?? 0) / 1000).toFixed(1)} s</span>
+              <button className="btn small" onClick={() => patchChart({ offsetMs: (saved.offsetMs ?? 0) + 500 })}>
+                {t('stage.lyricsLater')}
+              </button>
+            </div>
+          )}
           <div className="ktv" ref={ktvRef} aria-live="off">
             {chart && chart.lines.length > 0 ? (
               [0, 1].map((row) => {
@@ -783,36 +904,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
               >
                 {hud.playing ? t('stage.pause') : t('stage.resume')}
               </button>
-              {!isDemo && (<>
-              <input
-                className="seek"
-                type="range"
-                min={0}
-                max={Math.max(1, Math.floor(hud.dur))}
-                step={1}
-                value={drag ?? Math.floor(hud.time)}
-                aria-label={t('stage.seek')}
-                // while dragging the slider shows where you are going; the jump happens on release
-                onChange={(e) => setDrag(Number(e.target.value))}
-                onPointerUp={() => drag !== null && (seekTo(drag), setDrag(null))}
-                onKeyUp={() => drag !== null && (seekTo(drag), setDrag(null))}
-                onBlur={() => setDrag(null)}
-              />
-              {drag !== null && <small className="muted">→ {fmt(drag)}</small>}
-              <div className="row wrap">
-                <button className="btn small" onClick={() => seekTo(hud.time - 10)}>
-                  ⏪ 10
-                </button>
-                <button className="btn small" onClick={() => seekTo(hud.time + 10)}>
-                  10 ⏩
-                </button>
-                {firstVoice() !== null && hud.time < (firstVoice() ?? 0) && (
-                  <button className="btn small" onClick={() => seekTo(firstVoice()!)}>
-                    {t('stage.skipIntro')}
-                  </button>
-                )}
-              </div>
-              </>)}
+
               <button className="btn" onClick={restart}>
                 {t('stage.restart')}
               </button>

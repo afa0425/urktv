@@ -17,6 +17,8 @@ export interface ExtState {
   status?: ExtStatus;
   /** The lead player's frame: connected to the extension, blocked by the browser, or not yet. */
   tap?: 'connected' | 'blocked';
+  /** The AI could not be used this session (model failed to load, or switched to classic). */
+  fellBack?: boolean;
 }
 
 let state: ExtState = { present: false, consent: false };
@@ -36,6 +38,7 @@ if (typeof window !== 'undefined') {
         set({ tap: m.state === 'error' ? 'blocked' : 'connected' });
         if (m.state !== 'error') return;
       }
+      if (m.state === 'fallback') set({ fellBack: true });
       set({ status: { state: m.state, mode: m.mode, speed: m.speed, buffered: m.buffered, message: m.message, diag: m.diag } });
     }
   });

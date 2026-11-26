@@ -427,18 +427,19 @@ export class DualTransport implements Transport {
    * First start: the lead player starts now; the picture starts once the lead is really `ahead`
    * seconds in (YouTube buffers, so a fixed timer would leave the AI without its head start).
    */
-  startStaggered(onMainStart?: () => void) {
+  startStaggered(onMainStart?: () => void, ready?: () => boolean) {
     this.lead.play();
     window.clearInterval(this.timer);
     const t0 = performance.now();
     this.timer = window.setInterval(() => {
-      // a lead that cannot get going (blocked, an ad) must not hold the picture forever
-      if (this.lead.time() >= this.ahead || performance.now() - t0 > (this.ahead + 20) * 1000) {
+      const ok = ready ? ready() : this.lead.time() >= this.ahead;
+      // never hold the picture forever (a lead that cannot get going, an ad...)
+      if (ok || performance.now() - t0 > 10 * 60 * 1000) {
         window.clearInterval(this.timer);
         this.main.play();
         onMainStart?.();
       }
-    }, 100);
+    }, 200);
   }
   play() {
     this.waiting = null;
