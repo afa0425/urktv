@@ -86,7 +86,7 @@ async function hasRealGpu(): Promise<boolean> {
   const gpu = (navigator as any).gpu;
   if (!gpu) return false;
   try {
-    const a = await Promise.race([gpu.requestAdapter(), new Promise((r) => setTimeout(() => r(null), 3000))]);
+    const a = await Promise.race([gpu.requestAdapter({ powerPreference: 'high-performance' }), new Promise((r) => setTimeout(() => r(null), 3000))]);
     return !!a && !(a as any).isFallbackAdapter;
   } catch {
     return false;
@@ -96,7 +96,9 @@ async function hasRealGpu(): Promise<boolean> {
 async function getSession(key: string, url: string, ortBase: string) {
   if (session?.key === key) return session;
   ort.env.wasm.wasmPaths = ortBase;
-  ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 2) : 1;
+  ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.min(8, navigator.hardwareConcurrency || 2) : 1;
+  // laptops/desktops with two GPUs: ask for the discrete one (e.g. NVIDIA instead of the CPU's built-in graphics)
+  (ort.env.webgpu as any).powerPreference = 'high-performance';
   const bytes = await fetchModel(url);
   post({ type: 'progress', stage: 'load', done: 0, total: 1 });
   const tries: string[] = (await hasRealGpu()) ? ['webgpu', 'wasm'] : ['wasm'];

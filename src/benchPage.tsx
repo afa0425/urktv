@@ -10,14 +10,21 @@ type Row = { model: string; label: string; status: string; backend?: string; sec
 
 const CANDIDATES = ['kara2', 'inst_hq3'] as const;
 
+async function adapterName(gpu: any, pref: 'high-performance' | 'low-power'): Promise<string> {
+  const a = await gpu.requestAdapter({ powerPreference: pref });
+  if (!a) return '無';
+  const i = a.info || (a.requestAdapterInfo ? await a.requestAdapterInfo() : {});
+  return [i.vendor, i.architecture, i.device, i.description].filter(Boolean).join(' · ') || '（未提供型號）';
+}
+
+/** Both adapters: on two-GPU machines Chrome may still hand out the built-in one. */
 async function gpuInfo(): Promise<string> {
   const gpu = (navigator as any).gpu;
   if (!gpu) return '不支援 WebGPU（會改用 CPU）';
   try {
-    const a = await gpu.requestAdapter();
-    if (!a) return '沒有可用的顯示卡（會改用 CPU）';
-    const i = a.info || (a.requestAdapterInfo ? await a.requestAdapterInfo() : {});
-    return [i.vendor, i.architecture, i.device, i.description].filter(Boolean).join(' · ') || '有顯示卡（瀏覽器未提供型號）';
+    const hi = await adapterName(gpu, 'high-performance');
+    const lo = await adapterName(gpu, 'low-power');
+    return hi === lo ? hi : `高效能：${hi}／省電：${lo}`;
   } catch {
     return '無法取得顯示卡資訊';
   }
@@ -49,7 +56,7 @@ function Bench() {
   const [rows, setRows] = useState<Row[]>(CANDIDATES.map((m) => ({ model: m, label: MODELS[m].label, status: '等待' })));
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
-  const threads = self.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 2) : 1;
+  const threads = self.crossOriginIsolated ? Math.min(8, navigator.hardwareConcurrency || 2) : 1;
 
   const set = (i: number, p: Partial<Row>) => setRows((rs) => rs.map((r, k) => (k === i ? { ...r, ...p } : r)));
 
@@ -108,6 +115,11 @@ function Bench() {
           {busy ? '測試中…' : '開始測速'}
         </button>
         {gpu && <p className="muted small">顯示卡：{gpu}　CPU 執行緒：{threads}</p>}
+        {/amd|intel/i.test(gpu) && !/nvidia/i.test(gpu) && (
+          <p className="notice warn">
+            瀏覽器用的不是 NVIDIA 顯示卡。請到 Windows「設定 → 系統 → 顯示器 → 圖形」，把 Google Chrome 設成「高效能」（選 NVIDIA），完全關閉 Chrome 再打開，重新測一次。
+          </p>
+        )}
         <div className="card col">
           {rows.map((r) => (
             <div key={r.model} className="row between wrap">

@@ -143,7 +143,7 @@ function ImportPage() {
     }
   };
 
-  const threads = self.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 2) : 1;
+  const threads = self.crossOriginIsolated ? Math.min(8, navigator.hardwareConcurrency || 2) : 1;
   return (
     <div className="shell">
       <header className="topbar">
