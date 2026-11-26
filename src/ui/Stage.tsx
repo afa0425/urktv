@@ -124,7 +124,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   const ytCat = own && !!local && !hasAudio && !!local.video;
   // with the URKTV extension (computer Chrome) the MV's vocal is removed on this computer, live
   const ext = useExtension();
-  const [wantBacking, setWantBacking] = useState(true);
+  const [wantBacking, setWantBacking] = useState(false); // the original MV by default; the singer picks a backing
   // AI backing (clean, may need a head start) or fast backing (classic cut: starts at once, duller)
   const [bmode, setBmode] = useState<'ai' | 'fast'>(() => (localStorage.getItem('urktv.bmode') === 'fast' ? 'fast' : 'ai'));
   const bmodeRef = useRef(bmode);
