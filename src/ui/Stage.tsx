@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { MicPitch } from '../audio/mic';
 import { midiName } from '../audio/pitch';
-import { lineAt, parseChart, type Chart } from '../core/chart';
+import { lineAt, parseChart, type Chart, type Note } from '../core/chart';
 import { foldNear, FreeScorer, GuideScorer, type Difficulty, type ScoreExtras, type Scorer, type ScoreResult } from '../core/score';
 import { charts, DEMO_ID, renameSong, settings, useStore, type Song } from '../core/store';
 import { demoChart, DualTransport, LocalTransport, SynthTransport, toUltraStar, YouTubeTransport, type Transport } from '../core/transport';
@@ -76,6 +76,8 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   // encouragement: combo, high notes, per-line praise, gentle hints
   const newCoach = () => ({ idx: 0, combo: 0, max: 0, highHit: new Set<number>(), lines: new Map<number, number>(), lastHint: 0, lastPraise: 0, lastHigh: 0 });
   const coach = useRef(newCoach());
+  // live gray bars (made by the extension): which notes were judged, how high the song goes
+  const liveJudge = useRef({ done: new Set<number>(), run: 0, mids: new Map<number, number>() });
   const [pops, setPops] = useState<{ id: number; text: string; kind: string }[]>([]);
   const [combo, setCombo] = useState(0);
   const popId = useRef(0);
@@ -187,6 +189,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
     scorer.current = s;
     trace.current = [];
     coach.current = newCoach();
+    liveJudge.current = { done: new Set(), run: 0, mids: new Map() };
     setCombo(0);
   }, [chart, guide, cfg.difficulty, run]);
   useEffect(() => {
@@ -566,6 +569,54 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
         }
       }
 
+      // live bars: judge each note as it ends (combo, praise, hints), like prepared songs
+      if (playing && liveBars && notes) {
+        const J = liveJudge.current;
+        const c = coach.current;
+        for (const n of notes) {
+          if (n.end >= tc - 0.05 || n.end < tc - 1.5) continue;
+          const key = Math.round(n.start * 20);
+          if (J.done.has(key)) continue;
+          J.done.add(key);
+          let tot = 0;
+          let hit = 0;
+          for (const p of trace.current) {
+            if (p.t < n.start || p.t > n.end || p.midi === null) continue;
+            tot++;
+            if (p.hit) hit++;
+          }
+          if (n.end - n.start < 0.25) continue; // too short to judge fairly
+          const ratio = tot ? hit / tot : 0;
+          if (ratio >= 0.5) {
+            c.combo++;
+            c.max = Math.max(c.max, c.combo);
+            J.run++;
+            const high = (J.mids.get(-1) ?? 0) && n.midi >= (J.mids.get(-1) ?? 999);
+            if (high && now - c.lastHigh > 2500) {
+              c.lastHigh = now;
+              pop('🔥 高音達成！', 'gold');
+            } else if ([5, 10, 20, 30, 50, 80, 120].includes(c.combo)) pop(`連擊 ×${c.combo}！${PRAISE[c.combo % PRAISE.length]}`, 'combo');
+            else if (J.run >= 4 && now - c.lastPraise > 4000) {
+              c.lastPraise = now;
+              J.run = 0;
+              pop(LINE_PRAISE[(c.max + c.combo) % LINE_PRAISE.length], 'praise');
+            }
+          } else {
+            c.combo = 0;
+            J.run = 0;
+            const off = tot >= 5 ? meanOffset(trace.current, n, L.transpose) : null;
+            if (off !== null && Math.abs(off) > 0.9 && now - c.lastHint > 10000) {
+              c.lastHint = now;
+              pop(off > 0 ? '再低一點點就完美了' : '再高一點點就完美了', 'hint');
+            }
+          }
+        }
+        if (c.combo !== comboRef.current) {
+          comboRef.current = c.combo;
+          setCombo(c.combo);
+        }
+      }
+
       ktvRef.current?.style.setProperty('--t', String(time - L.offset));
       const ctx = cv.getContext('2d')!;
       const dpr = cv.width / Math.max(1, cv.clientWidth);
@@ -577,7 +628,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
           notes,
           transpose: L.transpose,
           curve: L.layered?.curve,
-          highlights: L.layered?.highlights,
+          highlights: L.layered?.highlights ?? (liveBars && notes ? liveHighs(notes) : undefined),
         });
       } else {
         drawLane(ctx, cv.clientWidth, cv.clientHeight, lane.current, {
@@ -776,6 +827,18 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
     return -1;
   };
 
+  /** High notes among the live bars: near the top of what the song has reached so far, and held. */
+  const liveHighs = (notes: Note[]) => {
+    const J = liveJudge.current;
+    for (const n of notes) J.mids.set(Math.round(n.start * 20), n.midi);
+    const all = [...J.mids.entries()].filter(([k]) => k >= 0).map(([, m]) => m).sort((a, b) => a - b);
+    if (all.length < 12) return undefined; // not enough of the song heard yet to know what is high
+    const top = all[Math.floor(all.length * 0.9)];
+    const med = all[all.length >> 1];
+    const bar = Math.max(top, med + 4);
+    J.mids.set(-1, bar);
+    return notes.filter((n) => n.midi >= bar && n.end - n.start >= 0.35).map((n) => ({ start: n.start, end: n.end, peak: midiName(n.midi + transpose) }));
+  };
   /** A web-lyrics line's characters, timed to where the separated vocal sings (else an estimate). */
   const lrcParts = (j: number) => {
     const line = chart!.lines[j];

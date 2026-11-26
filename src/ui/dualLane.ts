@@ -104,12 +104,12 @@ const NAT = new Set([0, 2, 4, 5, 7, 9, 11]);
 export function drawDualLane(ctx: CanvasRenderingContext2D, w: number, h: number, s: DualState, i: DualInput) {
   const past = 2.5;
   const future = 5.5;
-  const span = 16;
+  const span = 13;
   const ladder = 46; // note-name column on the left
   const pps = (w - ladder) / (past + future);
   const nowX = ladder + past * pps;
   const gap = 8;
-  const topH = Math.round(h * 0.56);
+  const topH = Math.round(h * 0.64);
   const botY = topH + gap;
   const botH = h - botY;
   const x = (t: number) => nowX + (t - i.now) * pps;
@@ -210,7 +210,7 @@ export function drawDualLane(ctx: CanvasRenderingContext2D, w: number, h: number
   };
 
   // top row: the original's bars
-  const barTop = Math.max(14, (topH / span) * 1.1);
+  const barTop = Math.max(16, (topH / span) * 1.2);
   ctx.save();
   ctx.beginPath();
   ctx.rect(ladder, 0, w - ladder, topH);
@@ -228,11 +228,11 @@ export function drawDualLane(ctx: CanvasRenderingContext2D, w: number, h: number
     // body
     const g = ctx.createLinearGradient(x0, yy, x0, yy + barTop);
     if (gold) {
-      g.addColorStop(0, 'rgba(255,214,120,0.75)');
-      g.addColorStop(1, 'rgba(255,160,60,0.55)');
+      g.addColorStop(0, 'rgba(255,226,140,0.95)');
+      g.addColorStop(1, 'rgba(255,150,40,0.85)');
     } else {
-      g.addColorStop(0, 'rgba(185,170,255,0.55)');
-      g.addColorStop(1, 'rgba(120,100,240,0.4)');
+      g.addColorStop(0, 'rgba(255,140,200,0.85)');
+      g.addColorStop(1, 'rgba(140,100,255,0.8)');
     }
     rr(ctx, x0, yy, bw, barTop, barTop / 2);
     ctx.fillStyle = n.end < i.now ? C.past : g;
@@ -242,6 +242,12 @@ export function drawDualLane(ctx: CanvasRenderingContext2D, w: number, h: number
     }
     ctx.fill();
     ctx.shadowBlur = 0;
+    if (n.end >= i.now) {
+      // gloss: a soft light band across the top, like a candy bar
+      rr(ctx, x0 + 3, yy + 2, Math.max(2, bw - 6), barTop * 0.38, barTop * 0.19);
+      ctx.fillStyle = 'rgba(255,255,255,0.28)';
+      ctx.fill();
+    }
     // the part already sung lights up: green if you were on it, faint otherwise
     if (n.start < i.now) {
       const r = hitIn(n);
@@ -258,16 +264,16 @@ export function drawDualLane(ctx: CanvasRenderingContext2D, w: number, h: number
       }
     }
     if (n.end >= i.now) {
-      ctx.strokeStyle = gold ? C.goldEdge : C.noteEdge;
-      ctx.lineWidth = now ? 2 : 1;
+      ctx.strokeStyle = gold ? C.goldEdge : 'rgba(255,200,235,0.9)';
+      ctx.lineWidth = now ? 2.5 : 1;
       rr(ctx, x0, yy, bw, barTop, barTop / 2);
       ctx.stroke();
     }
     // note name on bars that are wide enough
     if (bw > 30 && n.start > i.now - 0.2) {
-      ctx.font = 'bold 10px system-ui, sans-serif';
-      ctx.fillStyle = 'rgba(255,255,255,0.85)';
-      ctx.fillText(midiName(n.midi + i.transpose), x0 + 7, yy + barTop / 2 + 0.5);
+      ctx.font = 'bold 11px system-ui, sans-serif';
+      ctx.fillStyle = 'rgba(255,255,255,0.95)';
+      ctx.fillText(midiName(n.midi + i.transpose), x0 + 8, yy + barTop / 2 + 1);
     }
   }
   // the original's real pitch curve: slides, vibrato and runs show here

@@ -360,9 +360,12 @@ async function liteStep(): Promise<boolean | 'stale'> {
       for (let k = 0; k <= LN / 2; k++) {
         let m = 1;
         if (k < LB) {
-          const va = v[o + k] * v[o + k];
-          const aa = ac[o + k] * ac[o + k];
-          m = (aa + 5e-11) / (va + aa + 1e-10);
+          // sharper than Spleeter's default (power 2): where the voice dominates, more of it goes
+          const vv = v[o + k];
+          const av = ac[o + k];
+          const va = vv * vv * vv;
+          const aa = av * av * av;
+          m = (aa + 5e-13) / (va + aa + 1e-12);
         }
         ir[k] = fr.re[k] * m;
         ii[k] = fr.im[k] * m;

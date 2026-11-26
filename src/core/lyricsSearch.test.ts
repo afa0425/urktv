@@ -18,6 +18,9 @@ describe('lyrics search', () => {
   it('reads "artist - song" titles', () => {
     const p = parseTitle('周杰倫 Jay Chou【晴天 Sunny Day】Official MV');
     expect(p.songs).toContain('晴天');
+    const r = parseTitle('李佳薇 Jess Lee〈甲乙丙丁 Strangers〉Official Lyric Video');
+    expect(r.songs).toContain('甲乙丙丁');
+    expect(r.artists).toContain('李佳薇');
     const q = parseTitle('告五人 Accusefive - 愛人錯過 Official Music Video');
     expect(q.songs).toContain('愛人錯過');
   });

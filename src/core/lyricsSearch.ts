@@ -7,7 +7,7 @@ export interface LrcHit {
   duration: number;
 }
 
-const BR_SONG = /[\[【「『](.+?)[\]】」』]/g; // brackets that usually hold the song name
+const BR_SONG = /[\[【「『〈<＜«](.+?)[\]】」』〉>＞»]/g; // brackets that usually hold the song name
 const NOISE = /official\s*(music\s*)?video|music video|lyrics?\s*video|\bm\/?v\b|\bmv\b|official|官方|完整版|動態歌詞|歌詞版?|高音質|4k|hd|\bhq\b|ktv|伴奏|karaoke|首播|cover/gi;
 const cjk = (s: string) => (s.match(/[㐀-鿿豈-﫿]+/g) ?? []).join('');
 const norm = (s: string) => s.toLowerCase().replace(/[\s\p{P}\p{S}]/gu, '');
