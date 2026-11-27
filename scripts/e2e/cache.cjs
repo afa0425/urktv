@@ -8,7 +8,7 @@ const { chromium } = require('playwright');
   await ctx.grantPermissions(['microphone'], { origin: 'http://localhost:4173' });
   const p = await ctx.newPage(); const errs = []; p.on('pageerror', (e) => errs.push(e.message));
   const open = async (r) => {
-    await p.goto('http://localhost:4173/?fakeyt&r=' + r + '#');
+    await p.goto('http://localhost:4173/?fakeyt&debug&r=' + r + '#');
     await p.fill('.h-search input', 'https://youtu.be/abcdefghijk');
     await p.locator('.h-search button').click();
     await p.waitForSelector('.lead-box');
@@ -19,7 +19,7 @@ const { chromium } = require('playwright');
   await p.getByRole('button', { name: /離開/ }).click(); // leaving saves
   await p.waitForTimeout(1000);
   const saved = await p.evaluate(() => new Promise((ok) => {
-    const r = indexedDB.open('urktv-songs'); r.onsuccess = () => { const g = r.result.transaction('pitch').objectStore('pitch').get('abcdefghijk'); g.onsuccess = () => ok(g.result ? g.result.data.length : 0); };
+    const r = indexedDB.open('urktv-songs'); r.onsuccess = () => { const g = r.result.transaction('pitch').objectStore('pitch').get('v2:abcdefghijk'); g.onsuccess = () => ok(g.result ? g.result.data.length : 0); };
   }));
   console.log('frames saved after singing:', saved);
   await open(2);

@@ -70,6 +70,7 @@ export function App() {
         key={view.key}
         song={view.song}
         nextTitle={q[0]?.title}
+        onNext={q[0] ? () => singFromQueue(q[0], 0) : undefined}
         onExit={() => setView({ name: 'home' })}
         onDone={done}
       />

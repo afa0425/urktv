@@ -26,6 +26,8 @@ import { drawLane, nearestNote, type LaneState, type TracePoint } from './lane';
 interface Props {
   song: Song;
   nextTitle?: string;
+  /** Skip to the next song in the queue (no result screen). */
+  onNext?(): void;
   onExit(): void;
   onDone(result: ScoreResult, song: Song): void;
 }
@@ -41,7 +43,7 @@ const sungDur = (text: string) => Math.max(1, text.replace(/\s/g, '').length * 0
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
-export function Stage({ song, nextTitle, onExit, onDone }: Props) {
+export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
   const t = useT();
   const cfg = useStore(settings);
   const saved = useStore(charts)[song.id];
@@ -1288,6 +1290,11 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
               <button className="btn" onClick={restart}>
                 {t('stage.restart')}
               </button>
+              {onNext && (
+                <button className="btn" onClick={onNext} title="不看成績，直接唱下一首">
+                  ⏭ 切歌
+                </button>
+              )}
               {nextTitle && <p className="muted small">{t('queue.next', { title: nextTitle })}</p>}
             </div>
           )}
