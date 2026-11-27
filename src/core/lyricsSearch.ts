@@ -108,6 +108,9 @@ const CREDIT = /^\[[\d:.]+\]\s*(絃樂編寫|弦乐编写|配唱製作|配唱制
 /** Any "role : name" line whose role speaks of making the record (製作團隊 : …, 混音/母帶 : …, 製作人 Producer : …). */
 const CREDIT2 = /^\[[\d:.]+\]\s*[^:：]{0,24}(製作|制作|混音|母帶|母带|錄音|录音|編曲|编曲|作詞|作词|作曲|監製|监制|統籌|统筹|企劃|企划|和聲|和声|吉他|鋼琴|钢琴|弦樂|弦乐|發行|发行|出品|Producer|Mixing|Mastering|Arrang|Lyric|Compos|Guitar|Studio|OP|SP)[^:：]{0,24}[:：]/i;
 
+/** NetEase writes every credit as "role : name" with spaces round the colon (Bass : …, 詞 : …); and 【notices】. */
+const CREDIT3 = /^\[[\d:.]+\]\s*(\S[^:：]{0,22}\s[:：]\s.*|【.*】)\s*$/;
+
 /** Simplified → Traditional (Taiwan, with phrases); loaded only when a lyric needs it. */
 let toTw: ((s: string) => string) | null = null;
 async function traditional(text: string): Promise<string> {
@@ -122,7 +125,7 @@ async function tidy(lrc: string): Promise<string> {
   // drop credit lines and translations appended to a line ("…^English", "… / English")
   const lines = lrc
     .split('\n')
-    .filter((l) => !CREDIT.test(l.trim()) && !CREDIT2.test(l.trim()))
+    .filter((l) => !CREDIT.test(l.trim()) && !CREDIT2.test(l.trim()) && !CREDIT3.test(l.trim()))
     .map((l) => l.replace(/\^.*$/, '').replace(/\s+\/\s+[A-Za-z].*$/, ''));
   return traditional(lines.join('\n'));
 }
@@ -153,6 +156,13 @@ export function scoreCand(c: Cand, artists: string[], songs: string[], videoDur:
 }
 
 export async function findLyrics(videoTitle: string, videoDur = 0, hint?: SongHint, skip = 0): Promise<LrcHit | null> {
+  const hit = await search(videoTitle, videoDur, hint, skip);
+  if (hit || !hint) return hit;
+  // nothing under the chart's singer and name: the wider search by title, as for a pasted link
+  return (await search(`${hint.name} · ${hint.artist}`, videoDur, undefined, skip)) ?? (videoTitle.includes(' · ') ? null : search(videoTitle, videoDur, undefined, skip));
+}
+
+async function search(videoTitle: string, videoDur: number, hint: SongHint | undefined, skip: number): Promise<LrcHit | null> {
   const parsed = parseTitle(videoTitle);
   // a song from the charts: its singer and name are known, the MV title only adds spellings
   // "Various Artists" names nobody: such a song is found by its name alone
