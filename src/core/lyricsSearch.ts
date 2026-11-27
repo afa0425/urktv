@@ -8,6 +8,8 @@ export interface LrcHit {
   duration: number;
   /** How many usable lyric files were found: `skip` up to this picks another one. */
   count: number;
+  /** Which public lyric file this is ("L:<LRCLIB id>" or "N:<NetEase id>"): what a shared song sheet points at. */
+  ref?: string;
 }
 
 /** What the song list already knows about a song: better than guessing from the MV's title. */
@@ -113,6 +115,8 @@ export function parseTitle(title: string): { artists: string[]; songs: string[] 
 }
 
 interface Cand {
+  /** LRCLIB's own id of this lyric file */
+  id?: number;
   artistName: string;
   trackName: string;
   duration: number;
@@ -268,5 +272,17 @@ async function search(videoTitle: string, videoDur: number, hint: SongHint | und
   if (!good.length) return null; // nothing that is clearly this song: better no lyrics than wrong ones
   const { lrc, c } = good[skip % good.length];
   const t = tw(c);
-  return { lrc: await tidy(lrc), name: `${t.artistName} – ${t.trackName}`, duration: c.duration || 0, count: good.length };
+  const ref = c.ne ? `N:${c.ne}` : c.id ? `L:${c.id}` : undefined;
+  return { lrc: await tidy(lrc), name: `${t.artistName} – ${t.trackName}`, duration: c.duration || 0, count: good.length, ref };
+}
+
+/** The lyric file a shared song sheet points at (see LrcHit.ref). */
+export async function lyricsByRef(ref: string, name: string, duration: number): Promise<LrcHit | null> {
+  const id = ref.slice(2);
+  if (!/^\d+$/.test(id)) return null;
+  let lrc = '';
+  if (ref.startsWith('L:')) lrc = (await getJson<Cand>('https://lrclib.net/api/get/' + id, '/api/lyrics/lrclibid/' + id))?.syncedLyrics ?? '';
+  else if (ref.startsWith('N:')) lrc = (await getJson<{ lrc: string }>('/api/lyrics/163/' + id))?.lrc ?? '';
+  if ((lrc.match(/\[\d+:\d+/g) ?? []).length < 8) return null;
+  return { lrc: await tidy(lrc), name, duration, count: 1, ref };
 }

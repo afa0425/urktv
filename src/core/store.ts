@@ -95,6 +95,12 @@ export interface SavedChart {
   alt?: number;
   /** The timing was set by the singer, or has settled: do not move it again. */
   locked?: boolean;
+  /** Which public lyric file this is (what a shared song sheet points at). */
+  ref?: string;
+  /** The singer here placed these lyrics by hand: a shared sheet does not overrule that. */
+  mine?: boolean;
+  /** Lyrics and timing came from the shared song sheet. */
+  shared?: boolean;
 }
 
 export const settings = persisted<Settings>('hs.settings', {

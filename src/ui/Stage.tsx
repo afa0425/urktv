@@ -3,7 +3,7 @@ import { MicPitch } from '../audio/mic';
 import { midiName } from '../audio/pitch';
 import { lineAt, parseChart, type Chart, type Note } from '../core/chart';
 import { foldNear, FreeScorer, GuideScorer, type Difficulty, type ScoreExtras, type Scorer, type ScoreResult } from '../core/score';
-import { charts, DEMO_ID, renameSong, settings, useStore, type Song } from '../core/store';
+import { charts, DEMO_ID, renameSong, settings, useStore, type SavedChart, type Song } from '../core/store';
 import { demoChart, DualTransport, LocalTransport, SynthTransport, toUltraStar, YouTubeTransport, type Transport } from '../core/transport';
 import { extPost, LEAD, LITE_AHEAD, useExtension } from '../core/extension';
 import { MODELS } from '../separate/mdx';
@@ -17,7 +17,8 @@ import { NewVersion } from './NewVersion';
 import { Prep } from './Prep';
 import { cheer } from './cheers';
 import { playSfx, SFX, type SfxKind } from '../audio/sfx';
-import { findLyrics } from '../core/lyricsSearch';
+import { findLyrics, lyricsByRef } from '../core/lyricsSearch';
+import { loadSheet, shareBars, shareLyricTiming, unpackBars, type Sheet } from '../core/sheet';
 import { loadPitch, savePitch } from '../core/songCache';
 import { drawDualLane, meanOffset, type DualState } from './dualLane';
 import { useT, type I18nKey } from '../i18n';
@@ -148,8 +149,43 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
   const [lyricBusy, setLyricBusy] = useState(false);
   // a song from the charts is searched once, by its known singer and name (not again when the MV's title arrives)
   const lyricKey = hint ? `${hint.artist}|${hint.name}` : title;
+  // the shared song sheet for this MV (undefined: still asking; null: nobody has made one yet)
+  const [sheet, setSheet] = useState<Sheet | null | undefined>(undefined);
   useEffect(() => {
-    if (!ytPlain || (saved && !staleAuto) || !lyricKey || lyricKey.startsWith('YouTube · ') || triedLyrics.current === lyricKey) return;
+    if (!ytPlain) return;
+    let off = false;
+    setSheet(undefined);
+    void loadSheet(song.id).then((sh) => !off && setSheet(sh));
+    return () => {
+      off = true;
+    };
+  }, [ytPlain, song.id]);
+  const fromHit = (hit: { lrc: string; name: string; duration: number; ref?: string }, more: Partial<SavedChart> = {}): SavedChart => ({
+    raw: hit.lrc, kind: 'lrc', offsetMs: 0, transpose: 0, auto: LYRICS_V, name: hit.name, dur: hit.duration, alt: 0, ref: hit.ref, ...more,
+  });
+  useEffect(() => {
+    if (!ytPlain || sheet === undefined) return;
+    // somebody already matched lyrics to this MV and timed them: use that (unless this singer placed their own)
+    const sl = sheet?.lyr;
+    if (sl && !saved?.mine) {
+      const offsetMs = Math.round(sl.off * 1000);
+      if (saved?.ref === sl.ref) {
+        if (saved.offsetMs !== offsetMs || !saved.locked) patchChart({ offsetMs, locked: true, shared: true });
+        return;
+      }
+      if (triedLyrics.current === 'sheet:' + sl.ref) return;
+      triedLyrics.current = 'sheet:' + sl.ref;
+      let off = false;
+      void lyricsByRef(sl.ref, sl.name, sl.dur).then((hit) => {
+        if (off) return;
+        if (hit) charts.set((c) => ({ ...c, [song.id]: fromHit(hit, { offsetMs, locked: true, shared: true }) }));
+        else setSheet({ ...sheet!, lyr: null }); // that file is gone: look for lyrics the usual way
+      });
+      return () => {
+        off = true;
+      };
+    }
+    if ((saved && !staleAuto) || !lyricKey || lyricKey.startsWith('YouTube · ') || triedLyrics.current === lyricKey) return;
     triedLyrics.current = lyricKey;
     let off = false;
     const go = () =>
@@ -159,7 +195,7 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
           if (staleAuto) removeChart();
           return;
         }
-        charts.set((c) => ({ ...c, [song.id]: { raw: hit.lrc, kind: 'lrc', offsetMs: 0, transpose: 0, auto: LYRICS_V, name: hit.name, dur: hit.duration, alt: 0 } }));
+        charts.set((c) => ({ ...c, [song.id]: fromHit(hit) }));
       });
     // the video's length helps pick the right version: give the player a moment to know it
     const id = window.setTimeout(go, transport.current?.duration() ? 0 : 1500);
@@ -168,7 +204,7 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
       window.clearTimeout(id);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ytPlain, saved, lyricKey, song.id]);
+  }, [ytPlain, saved, lyricKey, song.id, sheet]);
   const [diagCopied, setDiagCopied] = useState(false);
   // getting the backing ready: progress 0-100, or null while the model loads
   const [prep, setPrep] = useState<{ pct: number | null; label: string } | null>(null);
@@ -179,10 +215,15 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
   const [hold, setHold] = useState<number | null>(null); // mid-song wait: progress 0-100
   // gray bars made live by the extension (songs without prepared bars)
   const liveNotes = useRef(new LiveNotes());
+  /** This computer listened to the song itself this time (not only bars from the cache or the sheet). */
+  const heardLive = useRef(false);
+  /** The best model that listened this time: 2 high quality, 1 light. */
+  const heardQ = useRef<0 | 1 | 2>(0);
   useEffect(() => {
     const on = (e: MessageEvent) => {
       if (e.source !== window || e.data?.source !== 'urktv-ext' || e.data.type !== 'pitch') return;
       liveNotes.current.add(e.data.t, e.data.hop, e.data.midi);
+      heardLive.current = true;
     };
     window.addEventListener('message', on);
     return () => window.removeEventListener('message', on);
@@ -196,13 +237,29 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
     const save = () => {
       const d = liveNotes.current.dump();
       if (d && d.data.length > 200) void savePitch(song.id, d);
+      return d;
     };
     const id = window.setInterval(save, 15000);
     return () => {
       window.clearInterval(id);
-      save();
+      const d = save();
+      // heard (nearly) the whole song here: its gray bars go to the shared sheet, for everyone
+      const dur = transport.current?.duration() || songDur.current;
+      if (d && heardLive.current && heardQ.current && !(sheetQ.current >= heardQ.current && sheetQ.current === 2)) shareBars(song.id, d, heardQ.current as 1 | 2, dur);
     };
   }, [ytPlain, song.id]);
+  // gray bars somebody's computer already made for this MV
+  const sheetQ = useRef(0);
+  const songDur = useRef(0);
+  useEffect(() => {
+    if (!sheet?.bars) return;
+    try {
+      liveNotes.current.restore(unpackBars(sheet.bars));
+      sheetQ.current = sheet.bars.q;
+    } catch {
+      /* a broken sheet: the bars come live as before */
+    }
+  }, [sheet]);
   const rebuffering = useRef(false);
   const extRef = useRef(ext);
   extRef.current = ext;
@@ -339,6 +396,9 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
         tr.seek(tr.time(), true);
       }
       if (st?.mode === 'ai' && (st.speed ?? 0) > 0) localStorage.setItem('urktv.aiSpeed', String(st.speed));
+      if (st?.mode === 'ai') heardQ.current = 2;
+      else if (st?.mode === 'lite' && heardQ.current < 1) heardQ.current = 1;
+      if (tr.duration()) songDur.current = tr.duration();
       const left = Math.max(0, (tr.duration() || 300) - tr.time());
       // the lead runs as far ahead as the chosen model needs
       const pl = plan(left);
@@ -384,14 +444,20 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
     const id = window.setInterval(() => {
       if (manualLyrics.current || saved.locked) return;
       const lines = chart.lines.filter((l) => l.text.trim()).map((l) => ({ start: l.start, end: Math.min(l.end, l.start + sungDur(l.text)) }));
-      const r = liveNotes.current.alignOffset(lines, offsetBounds(transport.current?.duration() || 0, saved.dur ?? 0));
+      // the MV is as long as the recording the lyrics were timed to: they are right as they are
+      const bounds = offsetBounds(transport.current?.duration() || 0, saved.dur ?? 0);
+      if (bounds === null) return;
+      const r = liveNotes.current.alignOffset(lines, bounds);
       if (!r || r.voiced < 12 || r.conf < 1.15) return; // not clear yet: leave the lyrics where they are
       // settled: three answers in a row agree with plenty heard -> stop moving the lyrics
       const hist = alignHist.current;
       hist.push(r.off);
       if (hist.length > 3) hist.shift();
       const settled = hist.length === 3 && r.voiced > 30 && Math.max(...hist) - Math.min(...hist) < 0.35;
-      if (settled) manualLyrics.current = true;
+      if (settled) {
+        manualLyrics.current = true;
+        if (saved.ref) shareLyricTiming(song.id, { ref: saved.ref, name: saved.name ?? '', dur: saved.dur ?? 0, off: r.off, how: 'auto' });
+      }
       const cur = (saved.offsetMs ?? 0) / 1000;
       if (Math.abs(r.off - cur) >= 0.3) patchChart({ offsetMs: Math.round(r.off * 1000), ...(settled ? { locked: true } : {}) });
       else if (settled) patchChart({ locked: true });
@@ -404,8 +470,21 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
   const nudgeLyrics = (sec: number) => {
     if (!saved) return;
     manualLyrics.current = true;
-    patchChart({ offsetMs: Math.round((saved.offsetMs ?? 0) + sec * 1000), locked: true });
+    nudged.current = true;
+    patchChart({ offsetMs: Math.round((saved.offsetMs ?? 0) + sec * 1000), locked: true, mine: true, shared: false });
   };
+  // where this singer put the lyrics goes to the shared sheet when they leave the song
+  const nudged = useRef(false);
+  const savedRef = useRef(saved);
+  savedRef.current = saved;
+  useEffect(
+    () => () => {
+      const sv = savedRef.current;
+      if (nudged.current && sv?.ref) shareLyricTiming(song.id, { ref: sv.ref, name: sv.name ?? '', dur: sv.dur ?? 0, off: (sv.offsetMs ?? 0) / 1000, how: 'manual' });
+      nudged.current = false;
+    },
+    [song.id],
+  );
   /** Wrong lyrics: take the next lyric file that was found for this song. */
   const otherLyrics = () => {
     if (!saved || lyricBusy) return;
@@ -416,7 +495,9 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
         if (!hit) return;
         manualLyrics.current = false;
         alignHist.current = [];
-        charts.set((c) => ({ ...c, [song.id]: { raw: hit.lrc, kind: 'lrc', offsetMs: 0, transpose: 0, auto: LYRICS_V, name: hit.name, dur: hit.duration, alt } }));
+        nudged.current = false;
+        // the singer chose another file: the shared sheet's choice no longer applies here
+        charts.set((c) => ({ ...c, [song.id]: fromHit(hit, { alt, mine: true }) }));
       })
       .finally(() => setLyricBusy(false));
   };
@@ -424,7 +505,7 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
   const autoLyrics = () => {
     manualLyrics.current = false;
     alignHist.current = [];
-    patchChart({ offsetMs: 0, locked: false });
+    patchChart({ offsetMs: 0, locked: false, mine: false, shared: false });
   };
 
   /** Everything needed to see where the backing track gets stuck, as text to copy. */
@@ -901,7 +982,7 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
     setRun((r) => r + 1);
   };
 
-  const patchChart = (p: { offsetMs?: number; transpose?: number; locked?: boolean }) =>
+  const patchChart = (p: Partial<SavedChart>) =>
     charts.set((c) => (c[song.id] ? { ...c, [song.id]: { ...c[song.id], ...p } } : c));
   const removeChart = () =>
     charts.set((c) => {
@@ -944,15 +1025,23 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
     J.mids.set(-1, bar);
     return notes.filter((n) => n.midi >= bar && n.end - n.start >= 0.35).map((n) => ({ start: n.start, end: n.end, peak: midiName(n.midi + transpose) }));
   };
-  /** A web-lyrics line's characters, timed to where the separated vocal sings (else an estimate). */
+  /**
+   * A web-lyrics line only says when it starts: it lights up evenly, character by character, over
+   * the time such a line takes to sing. (Guessing each character from the live vocal made the
+   * colour jump about; a steady sweep is what a KTV screen does.)
+   */
   const lrcParts = (j: number) => {
     const line = chart!.lines[j];
-    const off = live.current.offset;
-    const next = chart!.lines[j + 1]?.start ?? line.start + 12;
-    const est = [{ start: line.start, end: Math.min(line.end, line.start + sungDur(line.text)), text: line.text }];
-    if (!liveNotes.current.has()) return est;
-    const parts = liveNotes.current.charTimes(line.text, line.start + off - 0.5, Math.min(next, line.start + sungDur(line.text) * 1.8) + off - 0.15);
-    return parts ? parts.map((p) => ({ ...p, start: p.start - off, end: p.end - off })) : est;
+    const end = Math.min(line.end, line.start + sungDur(line.text));
+    const chars = [...line.text];
+    const units = chars.filter((c) => c.trim()).length || 1;
+    const step = (end - line.start) / units;
+    let u = 0;
+    return chars.map((c) => {
+      const start = line.start + u * step;
+      if (c.trim()) u++;
+      return { start, end: c.trim() ? start + step : start, text: c };
+    });
   };
 
   return (

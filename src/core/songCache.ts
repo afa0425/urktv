@@ -3,7 +3,7 @@
 const DB = 'urktv-songs';
 const STORE = 'pitch';
 /** Bumped when the analysis changes: older copies are ignored. */
-const V = 'v2:';
+const V = 'v3:';
 
 function db(): Promise<IDBDatabase> {
   return new Promise((ok, bad) => {
@@ -18,7 +18,7 @@ export interface PitchCache {
   hop: number;
   /** first frame index */
   k0: number;
-  /** midi × 10 per frame, 0 = silent */
+  /** per frame: 0 = not heard, 1 = heard and silent, else midi × 10 */
   data: Uint16Array;
 }
 

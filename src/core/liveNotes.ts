@@ -5,12 +5,13 @@ import type { Note } from './chart';
 /**
  * How far the lyrics can be off (media = lyric time + offset). The lyrics are timed to a recording of
  * `trackDur` seconds; an MV is that recording plus an intro and an ending, so the shift lies between
- * zero and the extra length. Equal lengths mean the same recording: the timing is right as it is.
+ * zero and the extra length. Equal lengths mean the same recording: the timing is right as it is
+ * (null: nothing to look for, the lyrics stay where their file put them).
  */
-export function offsetBounds(videoDur: number, trackDur: number): number | [number, number] {
+export function offsetBounds(videoDur: number, trackDur: number): number | [number, number] | null {
   if (!(videoDur > 0) || !(trackDur > 0)) return 60;
   const d = videoDur - trackDur;
-  if (Math.abs(d) <= 2.5) return [-2.5, 2.5];
+  if (Math.abs(d) <= 2.5) return null;
   return d > 0 ? [-3, d + 3] : [d - 3, 3];
 }
 
@@ -32,7 +33,8 @@ export class LiveNotes {
     this.ver++;
   }
 
-  /** Everything heard so far, compact (for keeping on this computer). */
+  /** Everything heard so far, compact (for keeping on this computer, and for the shared song sheet):
+   *  per frame 0 = not heard, 1 = heard and nobody sings, else midi × 10. */
   dump(): { hop: number; k0: number; data: Uint16Array } | null {
     if (!this.frames.size) return null;
     let k0 = Infinity;
@@ -42,17 +44,24 @@ export class LiveNotes {
       if (k > k1) k1 = k;
     }
     const data = new Uint16Array(k1 - k0 + 1);
-    for (const [k, m] of this.frames) if (m !== null) data[k - k0] = Math.round(m * 10);
+    for (const [k, m] of this.frames) data[k - k0] = m !== null ? Math.max(2, Math.round(m * 10)) : 1;
     return { hop: this.hop, k0, data };
   }
-  /** What an earlier time on this computer heard. */
+  /** What an earlier time on this computer (or another singer's computer) heard. */
   restore(c: { hop: number; k0: number; data: Uint16Array }) {
     this.hop = c.hop;
+    let last = -1;
     c.data.forEach((v, i) => {
-      if (!this.frames.has(c.k0 + i)) this.frames.set(c.k0 + i, v ? v / 10 : null);
+      if (!v) return;
+      last = i;
+      if (!this.frames.has(c.k0 + i)) this.frames.set(c.k0 + i, v > 1 ? v / 10 : null);
     });
-    this.edge = Math.max(this.edge, (c.k0 + c.data.length) * c.hop);
+    if (last >= 0) this.edge = Math.max(this.edge, (c.k0 + last + 1) * c.hop);
     this.ver++;
+  }
+  /** Seconds of the song heard so far. */
+  heard() {
+    return this.frames.size * this.hop;
   }
 
   has() {

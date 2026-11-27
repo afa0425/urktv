@@ -218,6 +218,14 @@ async function lyricsApi(req, url, path) {
       return json(await r.json());
     });
   }
+  const li = /^lyrics\/lrclibid\/(\d{1,12})$/.exec(path);
+  if (li) {
+    return cached(new Request(url.toString()), async () => {
+      const r = await fetch('https://lrclib.net/api/get/' + li[1], { headers: { 'User-Agent': 'URKTV (karaoke site; lyrics lookup)' } });
+      if (!r.ok) return json(null, r.status === 429 ? 429 : 502);
+      return json(await r.json());
+    });
+  }
   const m = /^lyrics\/163\/(\d{1,15})$/.exec(path);
   if (m) {
     return cached(new Request(url.toString()), async () => {
@@ -230,6 +238,71 @@ async function lyricsApi(req, url, path) {
   return null;
 }
 
+// ---------- song sheets: what singers' own computers worked out for an MV, shared with everyone ----------
+// A sheet is data about a video, never sound: which public lyric file fits it and by how many seconds
+// it must be shifted, and the pitch of the sung melody (the gray bars). Worked out once, used by all.
+const REF = /^[LN]:\d{1,15}$/;
+const median = (a) => {
+  const s = [...a].sort((x, y) => x - y);
+  return s.length ? s[s.length >> 1] : 0;
+};
+/** The lyric file most singers settled on, and where they put it. */
+function sheetView(sh) {
+  let best = null;
+  for (const [ref, l] of Object.entries(sh.lyrs || {})) {
+    const man = l.offs.filter((o) => o.how === 'manual');
+    const weight = man.length * 2 + (l.offs.length - man.length);
+    if (!best || weight > best.weight) best = { ref, name: l.name, dur: l.dur, off: median((man.length ? man : l.offs).map((o) => o.o)), votes: l.offs.length, sure: man.length > 0, weight };
+  }
+  if (best) delete best.weight;
+  return { lyr: best, bars: sh.bars || null };
+}
+async function sheetApi(req, env, id) {
+  const key = 'sheet:' + id;
+  if (req.method === 'GET') {
+    const sh = await env.SONGS.get(key, { type: 'json' });
+    if (!sh) return new Response('null', { status: 200, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'public, max-age=120' } });
+    return new Response(JSON.stringify(sheetView(sh)), { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'public, max-age=60' } });
+  }
+  if (req.method !== 'POST') return json({ error: 'method' }, 405);
+  const body = await req.text();
+  if (body.length > 200 * 1024) return json({ error: 'too large' }, 413);
+  let p;
+  try {
+    p = JSON.parse(body);
+  } catch {
+    return json({ error: 'not JSON' }, 400);
+  }
+  if (!p || typeof p !== 'object' || p.audio) return json({ error: 'a sheet is lyric timing and pitch only' }, 400);
+  const sh = (await env.SONGS.get(key, { type: 'json' })) || { lyrs: {}, bars: null };
+  let changed = false;
+  const l = p.lyr;
+  if (l) {
+    if (!REF.test(l.ref || '') || typeof l.off !== 'number' || !(Math.abs(l.off) <= 600)) return json({ error: 'lyr' }, 400);
+    const cur = (sh.lyrs[l.ref] ||= { name: clean(l.name, 160), dur: Number(l.dur) || 0, offs: [] });
+    cur.offs.push({ o: Math.round(l.off * 100) / 100, how: l.how === 'manual' ? 'manual' : 'auto', at: Date.now() });
+    cur.offs = cur.offs.slice(-9);
+    // a handful of lyric files per video at most: the least used goes
+    const refs = Object.keys(sh.lyrs);
+    if (refs.length > 4) delete sh.lyrs[refs.sort((a, b) => sh.lyrs[a].offs.length - sh.lyrs[b].offs.length)[0]];
+    changed = true;
+  }
+  const b = p.bars;
+  if (b) {
+    const ok = typeof b.data === 'string' && b.data.length > 400 && b.data.length < 160 * 1024 && /^[A-Za-z0-9+/=]+$/.test(b.data) &&
+      b.hop > 0.005 && b.hop < 0.1 && Number.isInteger(b.k0) && b.k0 > -100 && b.k0 < 100000 && [1, 2].includes(b.q) && b.cover > 0 && b.cover <= 1.05;
+    if (!ok) return json({ error: 'bars' }, 400);
+    const old = sh.bars;
+    // a better model wins; the same model wins when it has heard clearly more of the song
+    if (!old || b.q > old.q || (b.q === old.q && b.cover > old.cover + 0.05)) {
+      sh.bars = { hop: b.hop, k0: b.k0, q: b.q, cover: Math.round(b.cover * 100) / 100, data: b.data, at: Date.now() };
+      changed = true;
+    }
+  }
+  if (changed) await env.SONGS.put(key, JSON.stringify(sh));
+  return json({ ok: true, saved: changed });
+}
+
 async function api(req, env, url) {
   const path = url.pathname.replace(/^\/api\/?/, '');
   const rm = /^room\/([A-Za-z0-9]+)$/.exec(path);
@@ -239,6 +312,8 @@ async function api(req, env, url) {
     if (r) return r;
   }
   if (!env.SONGS) return json({ error: 'song library not configured' }, 503);
+  const sm = /^sheet\/([A-Za-z0-9_-]{11})$/.exec(path);
+  if (sm) return sheetApi(req, env, sm[1]);
   // list
   if (path === 'songs' && req.method === 'GET') {
     const idx = (await env.SONGS.get('index', { type: 'json' })) || { songs: [] };

@@ -61,7 +61,7 @@ describe('bars stay put', () => {
 
 describe('offsetBounds', () => {
   it('trusts the timing when the MV is as long as the recording', () => {
-    expect(offsetBounds(240, 239)).toEqual([-2.5, 2.5]);
+    expect(offsetBounds(240, 239)).toBeNull();
   });
   it('lets the lyrics move only as far as the MV is longer', () => {
     expect(offsetBounds(264, 241)).toEqual([-3, 26]);
