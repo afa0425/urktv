@@ -1,0 +1,12 @@
+import * as ort from '/home/user/urktv/node_modules/onnxruntime-web/dist/ort.node.min.mjs';
+import { readFileSync } from 'node:fs';
+const [file, threads, shape, secs] = process.argv.slice(2);
+ort.env.wasm.numThreads = +threads;
+const dims = shape.split('x').map(Number);
+const s = await ort.InferenceSession.create(readFileSync(file), { executionProviders: ['wasm'] });
+const x = new Float32Array(dims.reduce((a, b) => a * b)).map(() => Math.random());
+await s.run({ [s.inputNames[0]]: new ort.Tensor('float32', x, dims) });
+const t = performance.now();
+await s.run({ [s.inputNames[0]]: new ort.Tensor('float32', x, dims) });
+const d = (performance.now() - t) / 1000;
+console.log(file.split('/').pop(), 'wasm', threads, 'threads:', d.toFixed(2) + 's per ' + secs + 's =', (secs / d).toFixed(2) + 'x');
