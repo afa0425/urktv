@@ -18,7 +18,7 @@ const { chromium } = require('playwright');
   await p.getByRole('button', { name: /開始演唱/ }).first().click();
   for (const sec of [6, 12, 18, 24, 30]) {
     if (sec === 12) { await p.getByRole('radio', { name: '🎶 伴唱' }).click(); }
-    if (sec === 12) { await p.getByRole('button', { name: '♂ 男調' }).click(); await p.locator('.chip-btn.sfx').first().click(); await p.getByRole('button', { name: '🐿️ 可愛' }).click(); console.log('tools:', (await p.locator('.ktv-tools').innerText()).replace(/\n/g,' ')); console.log('key:', await p.locator('.key-ctl span').innerText()); }
+    if (sec === 12) { await p.locator('.tools-more > summary').click(); await p.getByRole('button', { name: '♂ 男調' }).click(); await p.locator('.chip-btn.sfx').first().click(); await p.getByRole('button', { name: '🐿️ 可愛' }).click(); console.log('tools:', (await p.locator('.ktv-tools').innerText()).replace(/\n/g,' ')); console.log('key:', await p.locator('.key-ctl span').innerText()); }
     if (sec === 18) { console.log('engine:', JSON.stringify(await ctx.serviceWorkers()[0].evaluate(() => chrome.runtime.sendMessage({ to: 'engine-diag' })))); console.log('chooser:', (await p.locator('.sing-mode').innerText()).replace(/\n/g,' ')); }
     await p.waitForTimeout(6000);
     await p.locator('details.diag summary').click().catch(() => {});

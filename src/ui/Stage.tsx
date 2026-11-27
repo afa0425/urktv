@@ -1018,7 +1018,9 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
     const out: { start: number; end: number; text: string }[] = [];
     ch.lines.forEach((l, j) => {
       if (l.end < tc - 3 || l.start > tc + 7) return;
-      for (const p of l.parts.length ? l.parts : lrcParts(j)) out.push(p);
+      // only characters whose sung time is really known go on the bars (web lyrics know just the line)
+      for (const p of l.parts) out.push(p);
+      void j;
     });
     return out;
   };
@@ -1054,7 +1056,7 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
   };
 
   return (
-    <div className="stage neon">
+    <div className="stage neon t3">
       <div className="beams" aria-hidden="true">
         <i />
         <i />
@@ -1065,13 +1067,27 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
           ← {t('stage.back')}
         </button>
         <h1 className="stage-title">{isDemo ? t('stage.demoTitle') : title}</h1>
-        <span className={'chip ' + (guide ? 'chip-on' : '')}>{t(guide ? 'stage.mode.guide' : 'stage.mode.free')}</span>
+        <div className="hud">
+          {combo >= 3 && (
+            <span key={combo} className={'hud-combo' + (combo >= 10 ? ' hot' : '')}>
+              🔥 連中 ×{combo}
+            </span>
+          )}
+          <span className="hud-score">
+            <small>{t('stage.score')}</small>
+            <b>{Math.round(hud.score)}</b>
+          </span>
+          <span className="hud-mic" title="麥克風收到的音量">
+            <i style={{ height: `${Math.round(Math.min(1, hud.level) * 100)}%` }} />
+          </span>
+        </div>
       </header>
       <NewVersion />
       <ExtUpdate />
 
       <div className="stage-grid">
         <section className="stage-main">
+          <div className="screen">
           <div className={'video ' + (isDemo || (own && !local?.video) ? 'video-demo' : '')}>
             <div className="video-host" ref={hostRef} />
             {isDemo && <div className="demo-art">♪ Do · Re · Mi · Fa · Sol</div>}
@@ -1115,7 +1131,7 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
                 const prevEnd = j > 0 ? chart.lines[j - 1].end : -99;
                 const dots = line && line.start - tl > 0 && line.start - tl <= 3 && line.start - prevEnd > 2 ? Math.ceil(line.start - tl) : 0;
                 return (
-                  <p key={row} className={'ktv-row ' + (row ? 'r' : 'l') + (j === li ? ' now' : '')}>
+                  <p key={row + ':' + j} className={'ktv-row ' + (row ? 'r' : 'l') + (j === li ? ' now' : '')}>
                     {dots > 0 && <span className="ktv-dots">{'●'.repeat(dots)}</span>}
                     {line &&
                       (line.parts.length ? line.parts : lrcParts(j)).map((p, k) => (
@@ -1131,7 +1147,18 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
                 );
               })
             ) : (
-              <p className="lyric-next">{chart ? '♪' : ''}</p>
+              <p className="lyric-next">{chart ? '♪' : ytPlain && phase === 'live' ? '這首歌還沒找到歌詞' : ''}</p>
+            )}
+            {ytPlain && saved?.kind === 'lrc' && phase === 'live' && (
+              <div className="ktv-nudge">
+                <button onClick={() => nudgeLyrics(-0.5)} title="歌詞比歌聲慢時按這個">
+                  ⏪ 歌詞早一點
+                </button>
+                <button onClick={() => nudgeLyrics(0.5)} title="歌詞比歌聲快時按這個">
+                  歌詞晚一點 ⏩
+                </button>
+                {saved.shared && <span title="別的歌手已經對好這支 MV 的歌詞時間">✓ 已對好時間</span>}
+              </div>
             )}
           </div>
 
@@ -1145,6 +1172,7 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
                 </div>
               ))}
             </div>
+          </div>
           </div>
           {phase === 'live' && (
             <div className="stage-bar">
@@ -1252,6 +1280,8 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
             </div>
           )}
           {(ytAny || own) && phase === 'live' && (
+            <details className="tools-more">
+            <summary>🎛 更多：男女調 · 氣氛音效 · 變聲 · 換歌詞</summary>
             <div className="ktv-tools">
               <div className="tool-group" title="男生唱女生的歌按男調，女生唱男生的歌按女調">
                 <span className="tool-label">調性</span>
@@ -1330,6 +1360,7 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
                 ))}
               </div>
             </div>
+            </details>
           )}
           {hqAsk && (
             <div className="hq-ask">

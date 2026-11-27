@@ -196,7 +196,8 @@ export function drawDualLane(ctx: CanvasRenderingContext2D, w: number, h: number
     const ph = bh * pulse * (0.4 + 0.6 * ease);
     const py = yy - (ph - bh) / 2;
     rr(ctx, x0, py, bw, ph, ph / 2);
-    ctx.fillStyle = n.end < i.now ? 'rgba(255,255,255,0.05)' : `hsla(${hue},85%,62%,${now ? 0.55 : 0.26})`;
+    // bars already sung keep their colour, dimmed (never a dead gray)
+    ctx.fillStyle = n.end < i.now ? `hsla(${hue},70%,55%,0.16)` : `hsla(${hue},85%,62%,${now ? 0.55 : 0.3})`;
     if (now || high) {
       ctx.shadowColor = gold ? 'rgba(255,210,90,0.9)' : `hsla(${hue},95%,65%,0.95)`;
       ctx.shadowBlur = now ? 26 : 12;
@@ -243,7 +244,7 @@ export function drawDualLane(ctx: CanvasRenderingContext2D, w: number, h: number
     }
     // outline
     rr(ctx, x0, py, bw, ph, ph / 2);
-    ctx.strokeStyle = gold ? 'rgba(255,214,110,0.95)' : now ? '#fff' : n.end < i.now ? 'rgba(255,255,255,0.15)' : `hsla(${hue},95%,78%,0.8)`;
+    ctx.strokeStyle = gold ? 'rgba(255,214,110,0.95)' : now ? '#fff' : n.end < i.now ? `hsla(${hue},80%,70%,0.32)` : `hsla(${hue},95%,78%,0.85)`;
     ctx.lineWidth = gold || now ? 2 : 1.2;
     ctx.stroke();
     // what to sing on this bar: its lyric character(s); else a mark for special notes
