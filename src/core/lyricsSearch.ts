@@ -159,7 +159,12 @@ export async function findLyrics(videoTitle: string, videoDur = 0, hint?: SongHi
   const hit = await search(videoTitle, videoDur, hint, skip);
   if (hit || !hint) return hit;
   // nothing under the chart's singer and name: the wider search by title, as for a pasted link
-  return (await search(`${hint.name} · ${hint.artist}`, videoDur, undefined, skip)) ?? (videoTitle.includes(' · ') ? null : search(videoTitle, videoDur, undefined, skip));
+  // ...but only an answer that carries this song's name: better no lyrics than another song's
+  const mine = (h: LrcHit | null) => (h && nameForms(hint.name).some((n) => overlap(n, h.name) >= 0.8) ? h : null);
+  return (
+    mine(await search(`${hint.name} · ${hint.artist}`, videoDur, undefined, skip)) ??
+    (videoTitle.includes(' · ') ? null : mine(await search(videoTitle, videoDur, undefined, skip)))
+  );
 }
 
 async function search(videoTitle: string, videoDur: number, hint: SongHint | undefined, skip: number): Promise<LrcHit | null> {

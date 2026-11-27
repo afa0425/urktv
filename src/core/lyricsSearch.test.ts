@@ -73,3 +73,17 @@ describe('credits', () => {
     }
   });
 });
+
+describe('nothing under the chart name', () => {
+  it('does not settle for another song', async () => {
+    const lrc = Array.from({ length: 10 }, (_, i) => `[00:${10 + i * 4}.00]line ${i}`).join('\n');
+    const real = globalThis.fetch;
+    globalThis.fetch = (async (u: string) => ({ ok: true, json: async () => (String(u).includes('lrclib') ? [{ artistName: 'RHINO', trackName: 'I Love You', duration: 262, syncedLyrics: lrc }] : { songs: [] }) }) as Response) as typeof fetch;
+    try {
+      const { findLyrics } = await import('./lyricsSearch');
+      expect(await findLyrics('蕭秉治 [ 我愛你一句話 I Love You ] Official MV', 275, { artist: '蕭秉治', name: '我愛你一句話' })).toBeNull();
+    } finally {
+      globalThis.fetch = real;
+    }
+  });
+});
