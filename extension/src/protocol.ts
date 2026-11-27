@@ -8,7 +8,7 @@ export const EXT = 'urktv-ext';
 export type PageMsg =
   | { type: 'hello' }
   | { type: 'consent'; ok: boolean }
-  | { type: 'start'; lead: number; vocal: number; mode: 'auto' | 'ai' | 'lite' | 'classic'; modelUrl: string; ortBase: string; model: string; liteBase?: string }
+  | { type: 'start'; lead: number; vocal: number; mode: 'auto' | 'ai' | 'lite' | 'classic'; modelUrl: string; ortBase: string; model: string; liteBase?: string; video?: string; dur?: number; bgAlways?: boolean }
   | { type: 'clock'; t: number; playing: boolean } // main (visible, muted) player's time
   | { type: 'vocal'; level: number }
   | { type: 'stop' };
@@ -16,7 +16,7 @@ export type PageMsg =
 /** extension -> page */
 export type ExtMsg =
   | { type: 'ready'; version: string; consent: boolean }
-  | { type: 'pitch'; t: number; hop: number; midi: (number | null)[] } // separated vocal's pitch, ahead of the picture
+  | { type: 'pitch'; t: number; hop: number; midi: (number | null)[]; q?: number } // separated vocal's pitch, ahead of the picture
   | { type: 'status'; state: 'loading' | 'running' | 'fallback' | 'error' | 'lost'; mode?: string; speed?: number; buffered?: number; message?: string };
 
 /** tap (YouTube frame) -> offscreen: one block of the lead player's audio */

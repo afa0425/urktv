@@ -1,9 +1,12 @@
 // The engine: turns the lead player's audio into backing track + guide vocal, ahead of the visible
-// (muted) player, and plays it in time with that player. Runs only on this computer; nothing is stored.
+// (muted) player, and plays it in time with that player. Runs only on this computer. The high-quality
+// backing it works out is kept on this computer (stems.ts) so the next time needs no waiting; nothing
+// is ever sent anywhere.
 import { detectPitch, freqToMidi } from '../../src/audio/pitch';
 import { MODELS, _Spectral, type MdxConfig } from '../../src/separate/mdx';
 import { FFT } from '../../src/separate/fft';
 import { decode16, type PageMsg, type TapBlock } from './protocol';
+import { Stems, loadStems, saveStems } from './stems';
 
 const RATE = 44100;
 const ctx = new AudioContext({ sampleRate: RATE, latencyHint: 'interactive' });
@@ -78,7 +81,9 @@ const S = {
 const PR = RATE / 2; // pitch runs at half rate (cheaper, plenty for a voice)
 const PF = 1024;
 const PH = 512;
-const P = { buf: new Float32Array(0), ibuf: new Float32Array(0), t: 0 };
+const newP = () => ({ buf: new Float32Array(0), ibuf: new Float32Array(0), t: 0 });
+let P = newP(); // the live vocal
+let PB = newP(); // the high-quality vocal worked out in the background
 const down = (ch: Float32Array[]) => {
   const n = ch[0].length >> 1;
   const m = new Float32Array(n);
@@ -94,7 +99,7 @@ const cat = (x: Float32Array, y: Float32Array) => {
   return c;
 };
 /** Pitch of the separated vocal, only where it really is singing: louder than what leaked in from the music. */
-function pitchFeed(t: number, voc: Float32Array[], inst?: Float32Array[]) {
+function pitchFeed(t: number, voc: Float32Array[], inst?: Float32Array[], q = 1, P = P0()) {
   const n = voc[0].length >> 1;
   if (!n) return;
   const mono = down(voc);
@@ -127,10 +132,14 @@ function pitchFeed(t: number, voc: Float32Array[], inst?: Float32Array[]) {
     // a voice sits between about E2 and C6
     midi.push(r && r.freq > 80 && r.freq < 1050 ? Math.round(freqToMidi(r.freq) * 10) / 10 : null);
   }
-  if (midi.length) toPage({ type: 'pitch', t: P.t + PF / 2 / PR, hop: PH / PR, midi });
+  if (midi.length) toPage({ type: 'pitch', t: P.t + PF / 2 / PR, hop: PH / PR, midi, q });
   P.buf = P.buf.slice(pos);
   P.ibuf = P.ibuf.slice(pos);
   P.t += pos / PR;
+}
+
+function P0() {
+  return P;
 }
 
 const toPage = (msg: unknown) => chrome.runtime.sendMessage({ to: 'page', msg }).catch(() => {});
@@ -370,6 +379,19 @@ async function liteStep(): Promise<boolean | 'stale'> {
   const NEW = liteN();
   if (S.len < liteNeed(NEW)) return false;
   const f0 = S.lf;
+  // this stretch was already worked out in high quality (now or another day): use that
+  const kept = K?.get(Math.round(S.t0 * RATE) + f0 * LH, NEW * LH);
+  if (kept) {
+    const t = S.t0 + (f0 * LH) / RATE;
+    S.segs.push({ t, inst: kept.inst, voc: kept.voc });
+    pitchFeed(t, kept.voc, kept.inst, 2);
+    S.makeup = 1;
+    applyGains();
+    S.lf += NEW;
+    S.done = (f0 + NEW) * LH;
+    KS.used += (NEW * LH) / RATE;
+    return true;
+  }
   const a = f0 - (LW - NEW - FUT);
   const t1 = performance.now();
   const keep0 = f0 - 3; // frames that reach into the output region
@@ -600,7 +622,8 @@ async function work() {
       const inst = cfg.primary === 'instrumental' ? prim : other;
       const voc = cfg.primary === 'instrumental' ? other : prim;
       S.segs.push({ t: S.t0 + S.done / RATE, inst, voc });
-      pitchFeed(S.t0 + S.done / RATE, voc, inst);
+      pitchFeed(S.t0 + S.done / RATE, voc, inst, 2);
+      K?.put(Math.round(S.t0 * RATE) + S.done, inst, voc);
       S.done += gen;
       if (S.mode === 'auto' && S.speed < 1.05) {
         S.using = 'classic'; // this computer cannot keep up: fall back
@@ -614,6 +637,109 @@ async function work() {
     S.busy = false;
   }
 }
+
+// --- the high-quality backing, kept on this computer ---
+// While the light AI plays live, the high-quality model goes over the same sound in the background
+// (only with CPU to spare) and its backing + vocal are kept in this browser's storage, per video.
+// Next time the kept parts are played straight away: no waiting, whatever the computer's speed.
+let K: Stems | null = null;
+const KS = { used: 0, savedAt: 0, savedHave: 0, saving: false };
+const B = { busy: false, pos: 0, gen: -1, speed: 0, url: '', ort: '', model: '', failed: false, always: false, since: 0 };
+
+async function openStems(video: string, dur: number) {
+  if (K && K.video === video) return;
+  await keepStems(true);
+  K = null;
+  KS.used = 0;
+  if (!video || !(dur > 20) || dur > 900) return;
+  K = (await loadStems(video).catch(() => null)) ?? new Stems(video, dur);
+  KS.savedHave = K.haveSecs();
+}
+/** Write what was worked out to this browser's storage (when there is enough new to be worth it). */
+async function keepStems(force = false) {
+  const k = K;
+  if (!k || KS.saving) return;
+  const have = k.haveSecs();
+  if (have - KS.savedHave < (force ? 5 : 45) && !(have >= k.dur * 0.97 && KS.savedHave < k.dur * 0.97)) return;
+  KS.saving = true;
+  try {
+    await saveStems(k);
+    KS.savedHave = have;
+    KS.savedAt = performance.now();
+  } catch (e: any) {
+    S.lastError = 'keep: ' + String(e?.message ?? e);
+  } finally {
+    KS.saving = false;
+  }
+}
+
+async function bgStep() {
+  if (B.busy || !S.running || !K || B.failed || !B.url) return;
+  if (S.using !== 'lite') return; // the high-quality model is playing live (its results are kept as it goes)
+  if (K.haveSecs() >= K.dur * 0.985) return;
+  if (performance.now() - B.since < 8000) return; // let the song start first
+  // only with CPU to spare: the live backing must never wait for this
+  const ahead = S.t0 + S.done / RATE - nowMedia();
+  if (!B.always && S.clock.playing && (S.speed < 1.6 || ahead < 1)) return;
+  B.busy = true;
+  try {
+    if (!S.session) {
+      if (S.loadingModel) return;
+      await loadModel(B.url, B.ort, B.model);
+    }
+    const cfg = S.cfg!;
+    const sp = S.sp!;
+    const chunk = sp.chunk;
+    const trim = cfg.nFft / 2;
+    const gen = chunk - 2 * trim;
+    if (B.gen !== S.resets) {
+      B.gen = S.resets;
+      B.pos = 0;
+      PB = newP();
+    }
+    const base = Math.round(S.t0 * RATE);
+    while (K.has(base + B.pos, gen)) B.pos += gen; // done another day
+    if (S.len < B.pos + gen + trim) return;
+    const a = B.pos - trim;
+    const win = (X: Float32Array) => {
+      const w = new Float32Array(chunk);
+      for (let i = 0; i < chunk; i++) {
+        const j = a + i;
+        w[i] = j >= 0 && j < S.len ? X[j] : 0;
+      }
+      return w;
+    };
+    const wl = win(S.L);
+    const wr = win(S.R);
+    const spec = new Float32Array(4 * cfg.dimF * cfg.dimT);
+    const t1 = performance.now();
+    sp.stft([wl, wr], spec);
+    const gen0 = S.resets;
+    const out = await aiRun(spec, [1, 4, cfg.dimF, cfg.dimT]);
+    if (gen0 !== S.resets || !K) return;
+    const [yl, yr] = sp.istft(out);
+    B.speed = gen / RATE / ((performance.now() - t1) / 1000);
+    const prim = [yl.subarray(trim, trim + gen), yr.subarray(trim, trim + gen)].map((c) => c.map((v) => v * cfg.compensate));
+    const mixed = [wl.subarray(trim, trim + gen), wr.subarray(trim, trim + gen)];
+    const other = mixed.map((m, c) => m.map((v, i) => v - prim[c][i]));
+    const inst = cfg.primary === 'instrumental' ? prim : other;
+    const voc = cfg.primary === 'instrumental' ? other : prim;
+    K.put(base + B.pos, inst, voc);
+    pitchFeed(S.t0 + B.pos / RATE, voc, inst, 2, PB);
+    B.pos += gen;
+  } catch (e: any) {
+    if (e?.message !== 'aborted') {
+      B.failed = true;
+      S.lastError = 'hq: ' + String(e?.message ?? e);
+    }
+  } finally {
+    B.busy = false;
+  }
+}
+setInterval(() => {
+  void bgStep();
+  void keepStems();
+}, 400);
 
 /** Where the visible player is now (media time). */
 const nowMedia = () => S.clock.t + (S.clock.playing ? (performance.now() - S.clock.at) / 1000 : 0);
@@ -668,7 +794,7 @@ setInterval(() => {
     }
     toPage({
       type: 'status', state: S.loadingModel ? 'loading' : 'running', mode: S.using, speed: S.speed, buffered: ahead,
-      diag: { ep: S.ep, epTimes: S.epTimes, blocks: S.blocks, lastTap: S.lastTap, segments: S.segs.length, played: S.played, resets: S.resets, clock: S.clock.t, playing: S.clock.playing, ctx: ctx.state, err: S.lastError },
+      diag: { hq: K ? { have: Math.round(K.haveSecs()), dur: Math.round(K.dur), used: Math.round(KS.used), bg: Math.round(B.speed * 100) / 100, kept: Math.round(KS.savedHave) } : null, ep: S.ep, epTimes: S.epTimes, blocks: S.blocks, lastTap: S.lastTap, segments: S.segs.length, played: S.played, resets: S.resets, clock: S.clock.t, playing: S.clock.playing, ctx: ctx.state, err: S.lastError },
     });
   }
 }, 250);
@@ -728,8 +854,17 @@ chrome.runtime.onMessage.addListener((m: any, _s: unknown, reply: (x: unknown) =
     void work();
   } else if (msg.type === 'start') {
     S.running = true;
-    P.buf = new Float32Array(0);
-    P.ibuf = new Float32Array(0);
+    P = newP();
+    PB = newP();
+    const sm = msg as any;
+    B.url = sm.modelUrl ?? '';
+    B.ort = sm.ortBase ?? '';
+    B.model = sm.model ?? '';
+    B.failed = false;
+    B.always = !!sm.bgAlways;
+    B.since = performance.now();
+    B.gen = -1;
+    void openStems(sm.video ?? '', Number(sm.dur) || 0);
     S.blocks = 0;
     S.played = 0;
     S.resets = 0;
@@ -817,6 +952,7 @@ chrome.runtime.onMessage.addListener((m: any, _s: unknown, reply: (x: unknown) =
     S.vocal = msg.level;
     applyGains();
   } else if (msg.type === 'stop') {
+    void keepStems(true);
     S.running = false;
     unschedule();
     reset(0);

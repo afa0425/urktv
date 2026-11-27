@@ -117,7 +117,7 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
   const [wantBacking] = useState(true);
   // AI backing (clean, may need a head start) or fast backing (classic cut: starts at once, duller)
   // high-quality AI for the backing (a second step: it can mean a long wait); else the light AI
-  const [hq, setHq] = useState(false);
+  const [hq, setHq] = useState(() => Number(localStorage.getItem('urktv.aiSpeed')) >= 1.3);
   // the guide vocal: the original kept faintly under the backing, at the singer's own level
   const [guideLvl, setGuideLvl] = useState(() => Number(localStorage.getItem('urktv.guide')) || 0.25);
   const [hqAsk, setHqAsk] = useState(false);
@@ -219,11 +219,15 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
   const heardLive = useRef(false);
   /** The best model that listened this time: 2 high quality, 1 light. */
   const heardQ = useRef<0 | 1 | 2>(0);
+  const hqHeard = useRef(0);
   useEffect(() => {
     const on = (e: MessageEvent) => {
       if (e.source !== window || e.data?.source !== 'urktv-ext' || e.data.type !== 'pitch') return;
       liveNotes.current.add(e.data.t, e.data.hop, e.data.midi);
       heardLive.current = true;
+      // heard through the high-quality model (live, in the background, or kept from another day)
+      if (e.data.q === 2) hqHeard.current += e.data.midi.length * e.data.hop;
+      else if (heardQ.current < 1) heardQ.current = 1;
     };
     window.addEventListener('message', on);
     return () => window.removeEventListener('message', on);
@@ -245,7 +249,8 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
       const d = save();
       // heard (nearly) the whole song here: its gray bars go to the shared sheet, for everyone
       const dur = transport.current?.duration() || songDur.current;
-      if (d && heardLive.current && heardQ.current && !(sheetQ.current >= heardQ.current && sheetQ.current === 2)) shareBars(song.id, d, heardQ.current as 1 | 2, dur);
+      const q = dur > 0 && hqHeard.current >= dur * 0.7 ? 2 : heardQ.current;
+      if (d && heardLive.current && q && sheetQ.current < 2) shareBars(song.id, d, q as 1 | 2, dur);
     };
   }, [ytPlain, song.id]);
   // gray bars somebody's computer already made for this MV
@@ -396,8 +401,9 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
         tr.seek(tr.time(), true);
       }
       if (st?.mode === 'ai' && (st.speed ?? 0) > 0) localStorage.setItem('urktv.aiSpeed', String(st.speed));
-      if (st?.mode === 'ai') heardQ.current = 2;
-      else if (st?.mode === 'lite' && heardQ.current < 1) heardQ.current = 1;
+      // how fast the high-quality model runs here, measured in the background: decides the next song's default
+      const bg = Number((st?.diag as any)?.hq?.bg) || 0;
+      if (bg > 0) localStorage.setItem('urktv.aiSpeed', String(bg));
       if (tr.duration()) songDur.current = tr.duration();
       const left = Math.max(0, (tr.duration() || 300) - tr.time());
       // the lead runs as far ahead as the chosen model needs
@@ -519,6 +525,7 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
       `主畫面：${tr instanceof DualTransport ? `${tr.main.playing() ? '播放中' : '沒在播'} ${fmt2(tr.main.time())} 秒${tr.syncing() ? '（等待同步）' : ''}` : '-'}`,
       `擷取：${ext.tap === 'connected' ? '已接上' : ext.tap === 'blocked' ? '被瀏覽器擋住' : '還沒接上'}`,
       `引擎：${ext.status?.state ?? '-'} / ${ext.status?.mode ?? '-'}，速度 ${fmt2(ext.status?.speed)} 倍，領先 ${fmt2(ext.status?.buffered)} 秒`,
+      d.hq ? `高品質伴奏（存在這台電腦）：已存 ${(d.hq as any).have}／${(d.hq as any).dur} 秒，這次用了 ${(d.hq as any).used} 秒，背景速度 ${fmt2((d.hq as any).bg)} 倍` : '',
       `收到聲音 ${d.blocks ?? '-'} 段（最後 ${fmt2(d.lastTap)} 秒），待播 ${d.segments ?? '-'} 段，已播 ${d.played ?? '-'} 段，重來 ${d.resets ?? '-'} 次`,
       d.ep ? `高品質模型跑在：${d.ep === 'wasm' ? 'CPU' : '顯示卡'}（實測 ${Object.entries(d.epTimes ?? {}).map(([k, v]) => `${k === 'wasm' ? 'CPU' : '顯示卡'} ${v}ms`).join('、') || '已記住'}）` : '',
       `引擎時鐘 ${fmt2(d.clock)} 秒（${d.playing ? '播放中' : '暫停'}），音訊 ${d.ctx ?? '-'}${d.err ? '，錯誤：' + d.err : ''}${ext.status?.message ? '，訊息：' + ext.status.message : ''}`,
@@ -849,7 +856,9 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
   const engineMode = () => (hqRef.current && !extRef.current.fellBack ? 'ai' : 'lite');
   const startMsg = () => {
     const md = MODELS.kara2;
-    return { type: 'start', lead: LEAD, vocal: vocalRef.current, mode: engineMode(), modelUrl: MODEL_BASE + md.file, ortBase: ORT_BASE, model: 'kara2', liteBase: MODEL_BASE };
+    // the video and its length: the high-quality backing worked out here is kept on this computer per video
+    const vid = ytCat ? live.current.layered?.video?.id : song.id;
+    return { type: 'start', lead: LEAD, vocal: vocalRef.current, mode: engineMode(), modelUrl: MODEL_BASE + md.file, ortBase: ORT_BASE, model: 'kara2', liteBase: MODEL_BASE, video: vid, dur: transport.current?.duration() || 0, bgAlways: /[?&]bgalways\b/.test(location.search) };
   };
   /** How far ahead the lead player should run, and how much backing to have before (re)starting. */
   const plan = (left: number) => {
@@ -1412,6 +1421,16 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
                       {ext.status.buffered !== undefined && phase === 'live' ? ' · ' + t('ext.ahead', { s: Math.max(0, ext.status.buffered).toFixed(1) }) : ''}
                     </small>
                   )}
+                  {(() => {
+                    const h = (ext.status?.diag as any)?.hq as { have: number; dur: number; used: number } | null | undefined;
+                    if (!h || !(h.dur > 0)) return null;
+                    const pct = Math.min(100, Math.round((h.have / h.dur) * 100));
+                    return (
+                      <small className="hq-kept" title="高品質伴奏是這台電腦自己算的，只存在這台電腦，不會上傳">
+                        {pct >= 97 ? '✨ 這首的高品質伴奏已存在這台電腦，之後一開就有' : h.used > 0 ? `✨ 正在用這台電腦存好的高品質伴奏（已存 ${pct}%）` : pct > 0 ? `✨ 背景準備高品質伴奏 ${pct}%（存在這台電腦，下次直接用）` : ''}
+                      </small>
+                    );
+                  })()}
                   <label className="field">
                     <span>
                       {t('mine.vocal')} · {Math.round(vocal * 100)}%
