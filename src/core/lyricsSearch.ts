@@ -51,6 +51,25 @@ export function overlap(a: string, b: string): number {
   return n / A.length;
 }
 
+/**
+ * How well name `a` is found in `b`, in order: 1 when b contains it whole; otherwise the share of its
+ * characters that appear in b in the same order, marked down (a jumble of the same characters, or
+ * Latin letters that merely occur somewhere, is not the same name).
+ */
+export function nameFit(a: string, b: string): number {
+  const A = [...norm(a)];
+  const B = [...norm(b)];
+  if (!A.length || !B.length) return 0;
+  if (B.join('').includes(A.join(''))) return 1;
+  let prev = new Array<number>(B.length + 1).fill(0);
+  for (const x of A) {
+    const cur = [0];
+    for (let j = 1; j <= B.length; j++) cur.push(x === B[j - 1] ? prev[j - 1] + 1 : Math.max(prev[j], cur[j - 1]));
+    prev = cur;
+  }
+  return (prev[B.length] / A.length) * 0.8;
+}
+
 /** Artist and song-name guesses from a title like "蕭秉治Xiao Bing Chih [ 想悄悄住進你的靈魂 I'm So Into You ] Official MV | 電視劇《難哄》". */
 export function parseTitle(title: string): { artists: string[]; songs: string[] } {
   const main = title.split(/[|｜]/)[0];
@@ -135,10 +154,10 @@ export function scoreCand(c: Cand, artists: string[], songs: string[], videoDur:
   // the track name without its "(電視劇《…》插曲)" style notes
   const track = c.trackName.replace(/[(（].*?[)）]/g, ' ');
   let song = 0;
-  for (const s of songs) song = Math.max(song, overlap(s, track), overlap(track, s) * 0.9);
+  for (const s of songs) song = Math.max(song, nameFit(s, track), nameFit(track, s) * 0.9);
   if (song < 0.6) return 0;
   let artist = 0;
-  for (const a of artists) artist = Math.max(artist, overlap(a, c.artistName));
+  for (const a of artists) artist = Math.max(artist, nameFit(a, c.artistName));
   let sc = song * 3 + artist * 2;
   // the singer is known for sure and this is somebody else: most likely another song with the same
   // name (only an equally long recording can still pass)
@@ -160,7 +179,7 @@ export async function findLyrics(videoTitle: string, videoDur = 0, hint?: SongHi
   if (hit || !hint) return hit;
   // nothing under the chart's singer and name: the wider search by title, as for a pasted link
   // ...but only an answer that carries this song's name: better no lyrics than another song's
-  const mine = (h: LrcHit | null) => (h && nameForms(hint.name).some((n) => overlap(n, h.name) >= 0.8) ? h : null);
+  const mine = (h: LrcHit | null) => (h && nameForms(hint.name).some((n) => nameFit(n, h.name) >= 0.64) ? h : null);
   return (
     mine(await search(`${hint.name} · ${hint.artist}`, videoDur, undefined, skip)) ??
     (videoTitle.includes(' · ') ? null : mine(await search(videoTitle, videoDur, undefined, skip)))

@@ -87,3 +87,18 @@ describe('nothing under the chart name', () => {
     }
   });
 });
+
+describe('nameFit', () => {
+  it('is not fooled by the same characters in another order, or stray Latin letters', async () => {
+    const { nameFit, scoreCand } = await import('./lyricsSearch');
+    expect(nameFit('我愛你一句話', '說出你聽過最假的一句話：我聽過的是«我永遠只愛你一個»')).toBeLessThan(0.6);
+    expect(nameFit('Jay Chou', '羅可Lorkin, CranetheBlue, Kevin羅凱文')).toBeLessThan(0.5);
+    expect(nameFit('Jay Chou', '周杰倫 Jay Chou')).toBe(1);
+    expect(nameFit('甲乙丙丁', '甲乙丙丁 (你我怎麼兩清)')).toBe(1);
+    // the singer is known: a cover of another length does not pass, the singer's own does
+    const cover = scoreCand({ artistName: '羅可Lorkin, CranetheBlue', trackName: '擱淺', duration: 205, syncedLyrics: 'x' }, ['周杰倫', 'Jay Chou'], ['擱淺'], 269, true);
+    const own = scoreCand({ artistName: 'Jay Chou', trackName: '擱淺', duration: 236, syncedLyrics: 'x' }, ['周杰倫', 'Jay Chou'], ['擱淺'], 269, true);
+    expect(cover).toBeLessThan(2.2);
+    expect(own).toBeGreaterThan(cover);
+  });
+});
