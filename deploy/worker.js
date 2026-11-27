@@ -204,6 +204,20 @@ async function lyricsApi(req, url, path) {
       return json({ songs });
     });
   }
+  if (path === 'lyrics/lrclib') {
+    // the public lyric library limits how often one address may ask: answers are kept a day and shared
+    const qs = new URLSearchParams();
+    for (const k of ['q', 'track_name', 'artist_name']) {
+      const v = (url.searchParams.get(k) || '').slice(0, 100);
+      if (v.trim()) qs.set(k, v);
+    }
+    if (![...qs.keys()].length) return json([]);
+    return cached(new Request(`${url.origin}/api/lyrics/lrclib?${qs}`), async () => {
+      const r = await fetch('https://lrclib.net/api/search?' + qs, { headers: { 'User-Agent': 'URKTV (karaoke site; lyrics lookup)' } });
+      if (!r.ok) return json([], r.status === 429 ? 429 : 502);
+      return json(await r.json());
+    });
+  }
   const m = /^lyrics\/163\/(\d{1,15})$/.exec(path);
   if (m) {
     return cached(new Request(url.toString()), async () => {

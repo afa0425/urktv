@@ -168,11 +168,30 @@ export function scoreCand(c: Cand, artists: string[], songs: string[], videoDur:
   // an MV is usually as long as the song or longer (intro, story); much shorter means another version
   if (videoDur > 0 && c.duration > 0) {
     const d = videoDur - c.duration;
-    if (d >= -8 && d <= 45) sc += 1;
+    if (d >= -8 && d <= 45) sc += Math.abs(d) <= 3 ? 1.5 : 1;
     else if (d < -20) sc -= 1.5;
   }
   return sc;
 }
+
+/** Answers already fetched (ten minutes): a second look at the same song asks nobody again. */
+const memo = new Map<string, { at: number; p: Promise<unknown> }>();
+function getJson<T>(url: string, alt?: string): Promise<T | null> {
+  const hit = memo.get(url);
+  if (hit && Date.now() - hit.at < 600000) return hit.p as Promise<T | null>;
+  const one = async (u: string) => {
+    const r = await fetch(u);
+    return r.ok ? ((await r.json()) as T) : null;
+  };
+  const p = one(url)
+    .catch(() => null)
+    // refused (the library limits how often one address may ask): the copy our own server keeps
+    .then((d) => d ?? (alt ? one(alt).catch(() => null) : null));
+  memo.set(url, { at: Date.now(), p });
+  void p.then((d) => d === null && memo.delete(url));
+  return p;
+}
+const lrclib = (qs: string) => getJson<Cand[]>('https://lrclib.net/api/search?' + qs, '/api/lyrics/lrclib?' + qs);
 
 export async function findLyrics(videoTitle: string, videoDur = 0, hint?: SongHint, skip = 0): Promise<LrcHit | null> {
   const hit = await search(videoTitle, videoDur, hint, skip);
@@ -203,23 +222,13 @@ async function search(videoTitle: string, videoDur: number, hint: SongHint | und
   const uniq = [...new Set(queries)];
   const seen = new Map<string, Cand>();
   // source 1: LRCLIB (free, public, many languages)
-  if (hint && known.length) {
-    try {
-      const r = await fetch(`https://lrclib.net/api/search?track_name=${encodeURIComponent(songs[0])}&artist_name=${encodeURIComponent(known[0])}`);
-      if (r.ok) for (const c of (await r.json()) as Cand[]) if (c.syncedLyrics) seen.set(`L|${c.artistName}|${c.trackName}|${c.duration}`, c);
-    } catch {
-      /* offline or blocked */
-    }
-  }
-  for (const q of uniq.slice(0, 6)) {
-    try {
-      const r = await fetch('https://lrclib.net/api/search?q=' + encodeURIComponent(q));
-      if (!r.ok) continue;
-      for (const c of (await r.json()) as Cand[]) if (c.syncedLyrics) seen.set(`L|${c.artistName}|${c.trackName}|${c.duration}`, c);
-    } catch {
-      /* offline or blocked */
-    }
+  const take = (list: Cand[] | null) => {
+    for (const c of list ?? []) if (c.syncedLyrics) seen.set(`L|${c.artistName}|${c.trackName}|${c.duration}`, c);
+  };
+  if (hint && known.length) take(await lrclib(`track_name=${encodeURIComponent(songs[0])}&artist_name=${encodeURIComponent(known[0])}`));
+  for (const q of uniq.slice(0, 4)) {
     if (seen.size >= 8) break;
+    take(await lrclib('q=' + encodeURIComponent(q)));
   }
   // compare in Traditional Chinese: 貓/猫, 膽/胆 must count as the same character
   await traditional('');
@@ -231,16 +240,12 @@ async function search(videoTitle: string, videoDur: number, hint: SongHint | und
       .sort((a, b) => b.sc - a.sc);
   let list = ranked();
   // source 2: NetEase Cloud Music through our server (most Mandarin, Taiwanese and Cantonese songs)
-  if (!list.length || list[0].sc < 3.5) {
-    for (const q of uniq.slice(0, 3)) {
-      try {
-        const r = await fetch('/api/lyrics/search?q=' + encodeURIComponent(q));
-        if (!r.ok) continue;
-        const d = (await r.json()) as { songs: { id: number; trackName: string; artistName: string; duration: number }[] };
-        for (const x of d.songs) seen.set(`N|${x.id}`, { ...x, syncedLyrics: null, ne: x.id });
-      } catch {
-        /* the site's own server is not here (local preview) */
-      }
+  // (also when the best so far is another cut: much longer or shorter than this MV)
+  const offLen = (c: Cand) => videoDur > 0 && c.duration > 0 && (videoDur - c.duration < -8 || videoDur - c.duration > 45);
+  if (!list.length || list[0].sc < 3.5 || offLen(list[0].c)) {
+    for (const q of uniq.slice(0, 2)) {
+      const d = await getJson<{ songs: { id: number; trackName: string; artistName: string; duration: number }[] }>('/api/lyrics/search?q=' + encodeURIComponent(q));
+      for (const x of d?.songs ?? []) seen.set(`N|${x.id}`, { ...x, syncedLyrics: null, ne: x.id });
     }
     list = ranked();
   }
@@ -250,12 +255,7 @@ async function search(videoTitle: string, videoDur: number, hint: SongHint | und
   for (const { c } of list.slice(0, 6)) {
     let lrc = c.syncedLyrics;
     if (c.ne) {
-      try {
-        const r = await fetch('/api/lyrics/163/' + c.ne);
-        lrc = r.ok ? ((await r.json()) as { lrc: string }).lrc : '';
-      } catch {
-        lrc = '';
-      }
+      lrc = (await getJson<{ lrc: string }>('/api/lyrics/163/' + c.ne))?.lrc ?? '';
     }
     if (!lrc || (lrc.match(/\[\d+:\d+/g) ?? []).length < 8) continue;
     // the same file under two names is one choice, not two
