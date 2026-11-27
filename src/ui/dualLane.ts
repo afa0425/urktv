@@ -8,6 +8,8 @@ import { countdownWord, goWord } from './cheers';
 
 export interface DualState {
   center: number;
+  /** Seconds of song shown to the right of "now" (glides towards what is known). */
+  future?: number;
 }
 
 export interface DualInput {
@@ -21,6 +23,8 @@ export interface DualInput {
   highlights?: { start: number; end: number; peak: string }[];
   /** Lyric characters with their sung times (chart time): written on the bars, like a KTV screen. */
   syl?: { start: number; end: number; text: string }[];
+  /** Bars made live: known only up to this time. The lane shows no further, so it is never half empty. */
+  knownTo?: number;
 }
 
 
@@ -84,13 +88,18 @@ interface Spark {
   hue: number;
 }
 const sparks: Spark[] = [];
+/** When each bar was first drawn: new bars grow in instead of popping up. */
+const born = new Map<number, number>();
 let lastFrame = 0;
+let lastSeenNow = 0;
 
 export function drawDualLane(ctx: CanvasRenderingContext2D, w: number, h: number, s: DualState, i: DualInput) {
   // one big lane (the original's notes, your voice riding on them) and a slim strip of your own
   // notes underneath, like the KTV apps people know
   const past = 2.2;
-  const future = 5.2;
+  const wantFuture = i.knownTo === undefined ? 5.2 : Math.max(2.8, Math.min(5.2, i.knownTo - i.now - 0.2));
+  s.future = s.future === undefined ? wantFuture : s.future + (wantFuture - s.future) * 0.03;
+  const future = s.future;
   const span = 12;
   const strip = Math.max(26, Math.round(h * 0.13));
   const laneH = h - strip - 6;
@@ -177,7 +186,14 @@ export function drawDualLane(ctx: CanvasRenderingContext2D, w: number, h: number
     const hue = (((n.midi + i.transpose) * 29) % 360 + 360) % 360;
     const high = (i.highlights ?? []).some((hl) => Math.abs(hl.start - n.start) < 0.05);
     const pulse = now ? 1 + 0.06 * Math.sin(t / 90) : 1;
-    const ph = bh * pulse;
+    // a bar seen for the first time grows in over a third of a second
+    const bk = Math.round(n.start * 50);
+    let b0 = born.get(bk);
+    if (b0 === undefined) born.set(bk, (b0 = n.start > i.now + 0.3 && lastSeenNow > 0 && Math.abs(i.now - lastSeenNow) < 0.5 ? t : t - 1000));
+    const grow = Math.min(1, (t - b0) / 330);
+    const ease = 1 - (1 - grow) * (1 - grow);
+    ctx.globalAlpha = ease;
+    const ph = bh * pulse * (0.4 + 0.6 * ease);
     const py = yy - (ph - bh) / 2;
     rr(ctx, x0, py, bw, ph, ph / 2);
     ctx.fillStyle = n.end < i.now ? 'rgba(255,255,255,0.05)' : `hsla(${hue},85%,62%,${now ? 0.55 : 0.26})`;
@@ -259,6 +275,9 @@ export function drawDualLane(ctx: CanvasRenderingContext2D, w: number, h: number
       ctx.fillText('⭐', x0 + 4, yy + bh / 2 + 1);
     }
   }
+  ctx.globalAlpha = 1;
+  lastSeenNow = i.now;
+  if (born.size > 4000) born.clear();
   // the original's real pitch curve (prepared songs)
   if (i.curve) {
     const { hop, midi } = i.curve;

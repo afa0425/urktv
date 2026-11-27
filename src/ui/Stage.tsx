@@ -11,7 +11,7 @@ import { MODEL_BASE, ORT_BASE } from '../separate/client';
 import { runWorker } from '../separate/client';
 import { fromInt16, getLocal, isLocal } from '../separate/db';
 import { computeHighlights, isCatalog, loadCatalog, type Layered } from '../core/catalog';
-import { LiveNotes } from '../core/liveNotes';
+import { LiveNotes, offsetBounds } from '../core/liveNotes';
 import { ExtUpdate } from './ExtUpdate';
 import { NewVersion } from './NewVersion';
 import { Prep } from './Prep';
@@ -31,7 +31,7 @@ interface Props {
 }
 
 /** Version of the lyrics search; lyrics saved by an older one are looked up again. */
-const LYRICS_V = 3;
+const LYRICS_V = 4;
 // ?debug: the lyrics search can be tried from the console
 if (typeof location !== 'undefined' && /[?&]debug\b/.test(location.search)) (window as any).urktvFindLyrics = findLyrics;
 
@@ -141,19 +141,23 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   const [drag, setDrag] = useState<number | null>(null);
   const triedLyrics = useRef('');
   // lyrics found by an older search (it could pick another song from the same drama): look again
-  const staleAuto = saved?.kind === 'lrc' && saved.auto !== LYRICS_V && saved.offsetMs === 0 && !saved.name?.startsWith('manual');
+  const staleAuto = saved?.kind === 'lrc' && !!saved.auto && saved.auto !== LYRICS_V && !saved.locked && !saved.name?.startsWith('manual');
+  const hint = song.artist && song.name ? { artist: song.artist, name: song.name } : undefined;
+  const [lyricBusy, setLyricBusy] = useState(false);
+  // a song from the charts is searched once, by its known singer and name (not again when the MV's title arrives)
+  const lyricKey = hint ? `${hint.artist}|${hint.name}` : title;
   useEffect(() => {
-    if (!ytPlain || (saved && !staleAuto) || !title || title.startsWith('YouTube · ') || triedLyrics.current === title) return;
-    triedLyrics.current = title;
+    if (!ytPlain || (saved && !staleAuto) || !lyricKey || lyricKey.startsWith('YouTube · ') || triedLyrics.current === lyricKey) return;
+    triedLyrics.current = lyricKey;
     let off = false;
     const go = () =>
-      findLyrics(title, transport.current?.duration() || 0).then((hit) => {
+      findLyrics(title, transport.current?.duration() || 0, hint).then((hit) => {
         if (off) return;
         if (!hit) {
           if (staleAuto) removeChart();
           return;
         }
-        charts.set((c) => ({ ...c, [song.id]: { raw: hit.lrc, kind: 'lrc', offsetMs: 0, transpose: 0, auto: LYRICS_V, name: hit.name } }));
+        charts.set((c) => ({ ...c, [song.id]: { raw: hit.lrc, kind: 'lrc', offsetMs: 0, transpose: 0, auto: LYRICS_V, name: hit.name, dur: hit.duration, alt: 0 } }));
       });
     // the video's length helps pick the right version: give the player a moment to know it
     const id = window.setTimeout(go, transport.current?.duration() ? 0 : 1500);
@@ -162,7 +166,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
       window.clearTimeout(id);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ytPlain, saved, title, song.id]);
+  }, [ytPlain, saved, lyricKey, song.id]);
   const [diagCopied, setDiagCopied] = useState(false);
   // getting the backing ready: progress 0-100, or null while the model loads
   const [prep, setPrep] = useState<{ pct: number | null; label: string } | null>(null);
@@ -376,21 +380,50 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
   useEffect(() => {
     if (phase !== 'live' || saved?.kind !== 'lrc' || !chart?.lines.length) return;
     const id = window.setInterval(() => {
-      if (manualLyrics.current) return;
+      if (manualLyrics.current || saved.locked) return;
       const lines = chart.lines.filter((l) => l.text.trim()).map((l) => ({ start: l.start, end: Math.min(l.end, l.start + sungDur(l.text)) }));
-      const r = liveNotes.current.alignOffset(lines, 60);
+      const r = liveNotes.current.alignOffset(lines, offsetBounds(transport.current?.duration() || 0, saved.dur ?? 0));
       if (!r || r.voiced < 12 || r.conf < 1.15) return; // not clear yet: leave the lyrics where they are
       // settled: three answers in a row agree with plenty heard -> stop moving the lyrics
       const hist = alignHist.current;
       hist.push(r.off);
       if (hist.length > 3) hist.shift();
-      if (hist.length === 3 && r.voiced > 30 && Math.max(...hist) - Math.min(...hist) < 0.35) manualLyrics.current = true;
+      const settled = hist.length === 3 && r.voiced > 30 && Math.max(...hist) - Math.min(...hist) < 0.35;
+      if (settled) manualLyrics.current = true;
       const cur = (saved.offsetMs ?? 0) / 1000;
-      if (Math.abs(r.off - cur) >= 0.3) patchChart({ offsetMs: Math.round(r.off * 1000) });
+      if (Math.abs(r.off - cur) >= 0.3) patchChart({ offsetMs: Math.round(r.off * 1000), ...(settled ? { locked: true } : {}) });
+      else if (settled) patchChart({ locked: true });
     }, 4000);
     return () => window.clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, saved?.kind, saved?.offsetMs, chart]);
+  }, [phase, saved?.kind, saved?.offsetMs, saved?.locked, chart]);
+
+  /** The singer moves the lyrics earlier or later; they then stay where the singer put them. */
+  const nudgeLyrics = (sec: number) => {
+    if (!saved) return;
+    manualLyrics.current = true;
+    patchChart({ offsetMs: Math.round((saved.offsetMs ?? 0) + sec * 1000), locked: true });
+  };
+  /** Wrong lyrics: take the next lyric file that was found for this song. */
+  const otherLyrics = () => {
+    if (!saved || lyricBusy) return;
+    setLyricBusy(true);
+    const alt = (saved.alt ?? 0) + 1;
+    findLyrics(title, transport.current?.duration() || 0, hint, alt)
+      .then((hit) => {
+        if (!hit) return;
+        manualLyrics.current = false;
+        alignHist.current = [];
+        charts.set((c) => ({ ...c, [song.id]: { raw: hit.lrc, kind: 'lrc', offsetMs: 0, transpose: 0, auto: LYRICS_V, name: hit.name, dur: hit.duration, alt } }));
+      })
+      .finally(() => setLyricBusy(false));
+  };
+  /** Let the computer line the lyrics up again (after a nudge went wrong). */
+  const autoLyrics = () => {
+    manualLyrics.current = false;
+    alignHist.current = [];
+    patchChart({ offsetMs: 0, locked: false });
+  };
 
   /** Everything needed to see where the backing track gets stuck, as text to copy. */
   const diagText = () => {
@@ -672,6 +705,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
           curve: L.layered?.curve,
           highlights: L.layered?.highlights ?? (liveBars && notes ? liveHighs(notes) : undefined),
           syl: sylNear(tc),
+          knownTo: liveBars ? liveNotes.current.edge - L.offset : undefined,
         });
       } else {
         drawLane(ctx, cv.clientWidth, cv.clientHeight, lane.current, {
@@ -865,7 +899,7 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
     setRun((r) => r + 1);
   };
 
-  const patchChart = (p: { offsetMs?: number; transpose?: number }) =>
+  const patchChart = (p: { offsetMs?: number; transpose?: number; locked?: boolean }) =>
     charts.set((c) => (c[song.id] ? { ...c, [song.id]: { ...c[song.id], ...p } } : c));
   const removeChart = () =>
     charts.set((c) => {
@@ -1001,6 +1035,17 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
             )}
           </div>
 
+          <div className={'lane-wrap' + (guide ? ' dual' : '')}>
+            <canvas ref={canvasRef} className="lane" />
+            {laneMsg && <div className="lane-msg">{laneMsg}</div>}
+            <div className="pops" aria-live="polite">
+              {pops.map((p) => (
+                <div key={p.id} className={'pop pop-' + p.kind}>
+                  {p.text}
+                </div>
+              ))}
+            </div>
+          </div>
           {phase === 'live' && (
             <div className="stage-bar">
               <button className="btn icon play" onClick={() => (hud.playing ? transport.current?.pause() : transport.current?.play())} aria-label={hud.playing ? t('stage.pause') : t('stage.resume')}>
@@ -1143,6 +1188,25 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
                   </button>
                 ))}
               </div>
+              {ytPlain && saved?.kind === 'lrc' && (
+                <div className="tool-group lyric-tools" title={`現在的歌詞：${saved.name ?? '網路歌詞'}`}>
+                  <span className="tool-label">歌詞</span>
+                  <button className="chip-btn" onClick={() => nudgeLyrics(-0.5)} title="歌詞比歌聲慢時按這個">
+                    ⏪ 早一點
+                  </button>
+                  <button className="chip-btn" onClick={() => nudgeLyrics(0.5)} title="歌詞比歌聲快時按這個">
+                    晚一點 ⏩
+                  </button>
+                  {saved.locked && (
+                    <button className="chip-btn" onClick={autoLyrics} title="交給電腦重新對時">
+                      自動對
+                    </button>
+                  )}
+                  <button className="chip-btn" onClick={otherLyrics} disabled={lyricBusy} title={`現在的歌詞：${saved.name ?? '網路歌詞'}。不是這首歌？換下一份`}>
+                    {lyricBusy ? '找歌詞中…' : '不對，換一份'}
+                  </button>
+                </div>
+              )}
               <div className="tool-group" title="聽自己的聲音時變聲（建議戴耳機）">
                 <span className="tool-label">變聲</span>
                 {(
@@ -1191,17 +1255,6 @@ export function Stage({ song, nextTitle, onExit, onDone }: Props) {
               </div>
             </div>
           )}
-          <div className={'lane-wrap' + (guide ? ' dual' : '')}>
-            <canvas ref={canvasRef} className="lane" />
-            {laneMsg && <div className="lane-msg">{laneMsg}</div>}
-            <div className="pops" aria-live="polite">
-              {pops.map((p) => (
-                <div key={p.id} className={'pop pop-' + p.kind}>
-                  {p.text}
-                </div>
-              ))}
-            </div>
-          </div>
           {micErr && <p className="notice warn">{t(micErr)}</p>}
           {!guide && !liveNotes.current.has() && <p className="notice">{t('stage.mode.free.hint')}</p>}
         </section>

@@ -25,3 +25,35 @@ describe('lyrics search', () => {
     expect(q.songs).toContain('愛人錯過');
   });
 });
+
+describe('a song from the charts', () => {
+  it('finds the lyrics by the known singer, not another song with the same name', async () => {
+    const lrc = (w: string) => Array.from({ length: 10 }, (_, i) => `[00:${String(10 + i * 4).padStart(2, '0')}.00]${w}${i}`).join('\n');
+    const calls: string[] = [];
+    const real = globalThis.fetch;
+    globalThis.fetch = (async (u: string) => {
+      calls.push(decodeURIComponent(String(u)));
+      const body = String(u).includes('lrclib')
+        ? [
+            { artistName: '別人', trackName: '擱淺', duration: 200, syncedLyrics: lrc('錯') },
+            { artistName: '周杰倫 Jay Chou', trackName: '擱淺', duration: 238, syncedLyrics: lrc('對') },
+            { artistName: '周杰倫', trackName: '擱淺 (Live)', duration: 251, syncedLyrics: lrc('現場') },
+          ]
+        : { songs: [] };
+      return { ok: true, json: async () => body } as Response;
+    }) as typeof fetch;
+    try {
+      const { findLyrics } = await import('./lyricsSearch');
+      const hit = await findLyrics('擱淺 · 周杰倫', 240, { artist: '周杰倫', name: '擱淺' });
+      expect(hit!.lrc).toContain('對0');
+      expect(hit!.duration).toBe(238);
+      expect(calls[0]).toContain('track_name=擱淺');
+      expect(calls[0]).toContain('artist_name=周杰倫');
+      // "these are the wrong lyrics": the next file, still this singer's
+      const other = await findLyrics('擱淺 · 周杰倫', 240, { artist: '周杰倫', name: '擱淺' }, 1);
+      expect(other!.lrc).toContain('現場0');
+    } finally {
+      globalThis.fetch = real;
+    }
+  });
+});

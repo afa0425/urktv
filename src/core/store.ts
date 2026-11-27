@@ -65,6 +65,9 @@ export interface Song {
   /** YouTube video id, or DEMO_ID for the built-in warm-up. */
   id: string;
   title: string;
+  /** From the song charts: who sings it and what it is called (finds the right lyrics). */
+  artist?: string;
+  name?: string;
 }
 
 export interface Play {
@@ -84,6 +87,12 @@ export interface SavedChart {
   /** Found automatically on the web (version of the search that found it), and what it was. */
   auto?: number;
   name?: string;
+  /** Length of the recording the lyrics were timed to (seconds): bounds how far the MV can be off. */
+  dur?: number;
+  /** Which of the lyric files found is in use (the singer can ask for another). */
+  alt?: number;
+  /** The timing was set by the singer, or has settled: do not move it again. */
+  locked?: boolean;
 }
 
 export const settings = persisted<Settings>('hs.settings', {

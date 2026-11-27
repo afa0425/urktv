@@ -2,11 +2,26 @@
 // seconds ahead of the picture; this turns it into bars the same way a prepared song looks.
 import type { Note } from './chart';
 
+/**
+ * How far the lyrics can be off (media = lyric time + offset). The lyrics are timed to a recording of
+ * `trackDur` seconds; an MV is that recording plus an intro and an ending, so the shift lies between
+ * zero and the extra length. Equal lengths mean the same recording: the timing is right as it is.
+ */
+export function offsetBounds(videoDur: number, trackDur: number): number | [number, number] {
+  if (!(videoDur > 0) || !(trackDur > 0)) return 60;
+  const d = videoDur - trackDur;
+  if (Math.abs(d) <= 2.5) return [-2.5, 2.5];
+  return d > 0 ? [-3, d + 3] : [d - 3, 3];
+}
+
 export class LiveNotes {
   private frames = new Map<number, number | null>();
   hop = 512 / 22050;
   /** Last media time with pitch data (bars exist up to here). */
   edge = 0;
+  /** Bumped whenever frames change: the bars are worked out once per change, not once per picture. */
+  private ver = 0;
+  private cache: { ver: number; notes: Note[] } | null = null;
 
   add(t: number, hop: number, midi: (number | null)[]) {
     this.hop = hop;
@@ -14,6 +29,7 @@ export class LiveNotes {
     midi.forEach((m, i) => this.frames.set(k0 + i, m));
     this.edge = Math.max(this.edge, t + midi.length * hop);
     if (this.frames.size > 200000) this.frames.clear(); // a very long session: start over
+    this.ver++;
   }
 
   /** Everything heard so far, compact (for keeping on this computer). */
@@ -36,6 +52,7 @@ export class LiveNotes {
       if (!this.frames.has(c.k0 + i)) this.frames.set(c.k0 + i, v ? v / 10 : null);
     });
     this.edge = Math.max(this.edge, (c.k0 + c.data.length) * c.hop);
+    this.ver++;
   }
 
   has() {
@@ -44,9 +61,29 @@ export class LiveNotes {
 
   /** Bars between a and b (media seconds). */
   between(a: number, b: number): Note[] {
+    return this.all().filter((n) => n.end >= a && n.start <= b);
+  }
+
+  /**
+   * Every bar heard so far. Worked out over the whole song each time new sound arrives, so a bar
+   * that is on the screen keeps its place and length (only the newest second can still grow).
+   */
+  all(): Note[] {
+    if (this.cache?.ver === this.ver) return this.cache.notes;
+    const notes = this.segment();
+    this.cache = { ver: this.ver, notes };
+    return notes;
+  }
+
+  private segment(): Note[] {
+    if (!this.frames.size) return [];
     const h = this.hop;
-    const k0 = Math.floor(a / h);
-    const k1 = Math.ceil(b / h);
+    let k0 = Infinity;
+    let k1 = -Infinity;
+    for (const k of this.frames.keys()) {
+      if (k < k0) k0 = k;
+      if (k > k1) k1 = k;
+    }
     // octave slips: a frame an octave away from its neighbourhood is folded back
     const raw: (number | null)[] = [];
     for (let k = k0 - 6; k <= k1 + 6; k++) raw.push(this.frames.get(k) ?? null);
@@ -101,7 +138,7 @@ export class LiveNotes {
    * Where the lyrics belong: the shift (media = line time + shift) that puts the most singing inside
    * the lyric lines and the least outside. Frames we have not heard yet count for nothing.
    */
-  alignOffset(lines: { start: number; end: number }[], range = 40): { off: number; voiced: number; conf: number } | null {
+  alignOffset(lines: { start: number; end: number }[], range: number | [number, number] = 40): { off: number; voiced: number; conf: number } | null {
     if (!lines.length || !this.frames.size) return null;
     const h = this.hop;
     let kMin = Infinity;
@@ -153,7 +190,8 @@ export class LiveNotes {
     let best = -Infinity;
     let off = 0;
     const scores: [number, number][] = [];
-    for (let o = -range; o <= range; o += 0.1) {
+    const [oLo, oHi] = typeof range === 'number' ? [-range, range] : range;
+    for (let o = oLo; o <= oHi + 1e-9; o += 0.1) {
       let sc = 0;
       for (const l of lines) {
         sc += sum(Math.round((l.start + o) / h), Math.round((l.end + o) / h));

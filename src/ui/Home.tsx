@@ -68,7 +68,7 @@ export function Home({ onSing, onRoom }: { onSing(song: Song): void; onRoom(): v
   const singChart = (i: ChartItem) => {
     const c = prepared.get(norm(i.title));
     if (c) onSing({ id: 'cat:' + c.slug, title: `${c.title} · ${c.artist}` });
-    else if (i.video) onSing({ id: i.video, title: `${i.title} · ${i.artist}` });
+    else if (i.video) onSing({ id: i.video, title: `${i.title} · ${i.artist}`, artist: i.artist, name: i.title });
   };
 
 
@@ -190,7 +190,7 @@ export function Home({ onSing, onRoom }: { onSing(song: Song): void; onRoom(): v
                       aria-label={t('home.add')}
                       title={t('home.add')}
                       onClick={() => {
-                        enqueue({ id: i.video, title: `${i.title} · ${i.artist}` });
+                        enqueue({ id: i.video, title: `${i.title} · ${i.artist}`, artist: i.artist, name: i.title });
                         setMsg({ text: `${t('home.added')}：${i.title}` });
                       }}
                     >

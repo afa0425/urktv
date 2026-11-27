@@ -4,7 +4,28 @@
 export interface LrcHit {
   lrc: string;
   name: string;
+  /** Length of the recording these lyrics were timed to (seconds; 0 = unknown). */
   duration: number;
+  /** How many usable lyric files were found: `skip` up to this picks another one. */
+  count: number;
+}
+
+/** What the song list already knows about a song: better than guessing from the MV's title. */
+export interface SongHint {
+  artist: string;
+  name: string;
+}
+
+const LATIN_GAP = /[㐀-鿿豈-﫿]+/g;
+/** A name as written in a chart ("甲乙丙丁Strangers", "DIOR 大穎"): whole, Chinese part, Latin part. */
+function nameForms(s: string): string[] {
+  const whole = s.replace(/[(（].*?[)）]/g, ' ').replace(/\s+/g, ' ').trim();
+  const out = [whole];
+  const c = cjk(whole);
+  if (c && c !== whole) out.push(c);
+  const latin = whole.replace(LATIN_GAP, ' ').replace(/\s+/g, ' ').trim();
+  if (latin.length > 2 && latin !== whole) out.push(latin);
+  return [...new Set(out.filter(Boolean))];
 }
 
 const BR_SONG = /[\[【「『〈<＜«](.+?)[\]】」』〉>＞»]/g; // brackets that usually hold the song name
@@ -104,7 +125,7 @@ async function tidy(lrc: string): Promise<string> {
 }
 
 /** How well an LRCLIB answer fits: the song name must match; artist and length add confidence. */
-export function scoreCand(c: Cand, artists: string[], songs: string[], videoDur: number): number {
+export function scoreCand(c: Cand, artists: string[], songs: string[], videoDur: number, sureArtist = false): number {
   // the track name without its "(電視劇《…》插曲)" style notes
   const track = c.trackName.replace(/[(（].*?[)）]/g, ' ');
   let song = 0;
@@ -113,6 +134,9 @@ export function scoreCand(c: Cand, artists: string[], songs: string[], videoDur:
   let artist = 0;
   for (const a of artists) artist = Math.max(artist, overlap(a, c.artistName));
   let sc = song * 3 + artist * 2;
+  // the singer is known for sure and this is somebody else: most likely another song with the same
+  // name (only an equally long recording can still pass)
+  if (sureArtist && artists.length && artist < 0.5) sc -= 1.5;
   if (/various artists/i.test(c.artistName)) sc -= 0.5;
   // uploads named like videos ("【動態歌詞MV】", 『lyric quote』) are less reliable than the real track
   if (/[【『]|動態|动态|\bmv\b|歌詞版|歌词版|lyrics?/i.test(c.trackName)) sc -= 1;
@@ -125,8 +149,11 @@ export function scoreCand(c: Cand, artists: string[], songs: string[], videoDur:
   return sc;
 }
 
-export async function findLyrics(videoTitle: string, videoDur = 0): Promise<LrcHit | null> {
-  const { artists, songs } = parseTitle(videoTitle);
+export async function findLyrics(videoTitle: string, videoDur = 0, hint?: SongHint, skip = 0): Promise<LrcHit | null> {
+  const parsed = parseTitle(videoTitle);
+  // a song from the charts: its singer and name are known, the MV title only adds spellings
+  const artists = hint ? [...new Set([...nameForms(hint.artist), ...parsed.artists])] : parsed.artists;
+  const songs = hint ? nameForms(hint.name) : parsed.songs;
   const queries: string[] = [];
   for (const s of songs) {
     for (const a of artists) queries.push(`${a} ${s}`);
@@ -135,6 +162,14 @@ export async function findLyrics(videoTitle: string, videoDur = 0): Promise<LrcH
   const uniq = [...new Set(queries)];
   const seen = new Map<string, Cand>();
   // source 1: LRCLIB (free, public, many languages)
+  if (hint) {
+    try {
+      const r = await fetch(`https://lrclib.net/api/search?track_name=${encodeURIComponent(songs[0])}&artist_name=${encodeURIComponent(nameForms(hint.artist)[0])}`);
+      if (r.ok) for (const c of (await r.json()) as Cand[]) if (c.syncedLyrics) seen.set(`L|${c.artistName}|${c.trackName}|${c.duration}`, c);
+    } catch {
+      /* offline or blocked */
+    }
+  }
   for (const q of uniq.slice(0, 6)) {
     try {
       const r = await fetch('https://lrclib.net/api/search?q=' + encodeURIComponent(q));
@@ -150,7 +185,7 @@ export async function findLyrics(videoTitle: string, videoDur = 0): Promise<LrcH
   const tw = (c: Cand): Cand => ({ ...c, trackName: toTw!(c.trackName), artistName: toTw!(c.artistName) });
   const ranked = () =>
     [...seen.values()]
-      .map((c) => ({ c, sc: scoreCand(tw(c), artists.map(toTw!), songs.map(toTw!), videoDur) }))
+      .map((c) => ({ c, sc: scoreCand(tw(c), artists.map(toTw!), songs.map(toTw!), videoDur, !!hint) }))
       .filter((x) => x.sc >= 2.2)
       .sort((a, b) => b.sc - a.sc);
   let list = ranked();
@@ -168,8 +203,10 @@ export async function findLyrics(videoTitle: string, videoDur = 0): Promise<LrcH
     }
     list = ranked();
   }
-  // the best match that really has timed lyrics (some entries have none, or only a few lines)
-  for (const { c } of list.slice(0, 4)) {
+  // the best matches that really have timed lyrics (some entries have none, or only a few lines)
+  const good: { lrc: string; c: Cand }[] = [];
+  const texts = new Set<string>();
+  for (const { c } of list.slice(0, 6)) {
     let lrc = c.syncedLyrics;
     if (c.ne) {
       try {
@@ -180,8 +217,15 @@ export async function findLyrics(videoTitle: string, videoDur = 0): Promise<LrcH
       }
     }
     if (!lrc || (lrc.match(/\[\d+:\d+/g) ?? []).length < 8) continue;
-    const t = tw(c);
-    return { lrc: await tidy(lrc), name: `${t.artistName} – ${t.trackName}`, duration: c.duration };
+    // the same file under two names is one choice, not two
+    const sig = `${Math.round(c.duration)}|${lrc.replace(/\[[^\]]*\]|\s/g, '').slice(0, 60)}`;
+    if (texts.has(sig)) continue;
+    texts.add(sig);
+    good.push({ lrc, c });
+    if (good.length > skip + 2) break;
   }
-  return null; // nothing that is clearly this song: better no lyrics than wrong ones
+  if (!good.length) return null; // nothing that is clearly this song: better no lyrics than wrong ones
+  const { lrc, c } = good[skip % good.length];
+  const t = tw(c);
+  return { lrc: await tidy(lrc), name: `${t.artistName} – ${t.trackName}`, duration: c.duration || 0, count: good.length };
 }

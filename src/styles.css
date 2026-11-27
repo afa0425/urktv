@@ -2054,3 +2054,10 @@ a.btn {
   padding: 0 20px;
 }
 .lane-msg b { color: var(--text); }
+
+/* the bars sit right under the lyrics; everything fits one laptop screen */
+.stage-main .lane-wrap,
+.stage-main .lane-wrap.dual {
+  margin-top: 8px;
+  height: 210px;
+}
