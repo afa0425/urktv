@@ -68,6 +68,8 @@ export interface Song {
   /** From the song charts: who sings it and what it is called (finds the right lyrics). */
   artist?: string;
   name?: string;
+  /** The MV's own title, when the charts know it (other spellings of the singer). */
+  mv?: string;
 }
 
 export interface Play {

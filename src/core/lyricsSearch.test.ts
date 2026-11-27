@@ -57,3 +57,19 @@ describe('a song from the charts', () => {
     }
   });
 });
+
+describe('credits', () => {
+  it('drops the people who made the record, keeps what is sung', async () => {
+    const lines = ['[00:00.00]製作團隊 : 撥片音樂', '[00:01.00]混音/母帶 : 張鳴利', '[00:02.00]製作人 Producer : 陳皓宇', ...Array.from({ length: 9 }, (_, i) => `[00:${10 + i * 3}.00]我說：愛你${i}`)];
+    const real = globalThis.fetch;
+    globalThis.fetch = (async (u: string) => ({ ok: true, json: async () => (String(u).includes('lrclib') ? [{ artistName: '甲', trackName: '乙丙', duration: 100, syncedLyrics: lines.join('\n') }] : { songs: [] }) }) as Response) as typeof fetch;
+    try {
+      const { findLyrics } = await import('./lyricsSearch');
+      const hit = await findLyrics('x', 100, { artist: '甲', name: '乙丙' });
+      expect(hit!.lrc).not.toMatch(/撥片|張鳴利|陳皓宇/);
+      expect(hit!.lrc).toContain('我說：愛你0');
+    } finally {
+      globalThis.fetch = real;
+    }
+  });
+});

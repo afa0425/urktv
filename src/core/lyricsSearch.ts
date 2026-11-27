@@ -105,6 +105,9 @@ interface Cand {
 /** Credits that some lyric files carry as timed lines (作词 : …): not to be sung. */
 const CREDIT = /^\[[\d:.]+\]\s*(絃樂編寫|弦乐编写|配唱製作|配唱制作|作词|作詞|作曲|编曲|編曲|制作人|製作人|监制|監製|混音|母带|母帶|和声|和聲|录音|錄音|吉他|贝斯|貝斯|鼓|弦乐|弦樂|出品|发行|發行|OP|SP|Lyricist|Composer|Arranger|Producer)\s*[:：]/i;
 
+/** Any "role : name" line whose role speaks of making the record (製作團隊 : …, 混音/母帶 : …, 製作人 Producer : …). */
+const CREDIT2 = /^\[[\d:.]+\]\s*[^:：]{0,24}(製作|制作|混音|母帶|母带|錄音|录音|編曲|编曲|作詞|作词|作曲|監製|监制|統籌|统筹|企劃|企划|和聲|和声|吉他|鋼琴|钢琴|弦樂|弦乐|發行|发行|出品|Producer|Mixing|Mastering|Arrang|Lyric|Compos|Guitar|Studio|OP|SP)[^:：]{0,24}[:：]/i;
+
 /** Simplified → Traditional (Taiwan, with phrases); loaded only when a lyric needs it. */
 let toTw: ((s: string) => string) | null = null;
 async function traditional(text: string): Promise<string> {
@@ -119,7 +122,7 @@ async function tidy(lrc: string): Promise<string> {
   // drop credit lines and translations appended to a line ("…^English", "… / English")
   const lines = lrc
     .split('\n')
-    .filter((l) => !CREDIT.test(l.trim()))
+    .filter((l) => !CREDIT.test(l.trim()) && !CREDIT2.test(l.trim()))
     .map((l) => l.replace(/\^.*$/, '').replace(/\s+\/\s+[A-Za-z].*$/, ''));
   return traditional(lines.join('\n'));
 }
@@ -152,7 +155,11 @@ export function scoreCand(c: Cand, artists: string[], songs: string[], videoDur:
 export async function findLyrics(videoTitle: string, videoDur = 0, hint?: SongHint, skip = 0): Promise<LrcHit | null> {
   const parsed = parseTitle(videoTitle);
   // a song from the charts: its singer and name are known, the MV title only adds spellings
-  const artists = hint ? [...new Set([...nameForms(hint.artist), ...parsed.artists])] : parsed.artists;
+  // "Various Artists" names nobody: such a song is found by its name alone
+  const known = hint && !/various artists|群星|合輯/i.test(hint.artist) ? nameForms(hint.artist) : [];
+  // the MV's title often has the singer's other spelling (Jay Chou); the chart's own "name · singer" string has nothing new
+  const extra = hint && videoTitle.includes(' · ') ? [] : parsed.artists;
+  const artists = hint ? [...new Set([...known, ...extra])] : parsed.artists;
   const songs = hint ? nameForms(hint.name) : parsed.songs;
   const queries: string[] = [];
   for (const s of songs) {
@@ -162,9 +169,9 @@ export async function findLyrics(videoTitle: string, videoDur = 0, hint?: SongHi
   const uniq = [...new Set(queries)];
   const seen = new Map<string, Cand>();
   // source 1: LRCLIB (free, public, many languages)
-  if (hint) {
+  if (hint && known.length) {
     try {
-      const r = await fetch(`https://lrclib.net/api/search?track_name=${encodeURIComponent(songs[0])}&artist_name=${encodeURIComponent(nameForms(hint.artist)[0])}`);
+      const r = await fetch(`https://lrclib.net/api/search?track_name=${encodeURIComponent(songs[0])}&artist_name=${encodeURIComponent(known[0])}`);
       if (r.ok) for (const c of (await r.json()) as Cand[]) if (c.syncedLyrics) seen.set(`L|${c.artistName}|${c.trackName}|${c.duration}`, c);
     } catch {
       /* offline or blocked */
@@ -185,7 +192,7 @@ export async function findLyrics(videoTitle: string, videoDur = 0, hint?: SongHi
   const tw = (c: Cand): Cand => ({ ...c, trackName: toTw!(c.trackName), artistName: toTw!(c.artistName) });
   const ranked = () =>
     [...seen.values()]
-      .map((c) => ({ c, sc: scoreCand(tw(c), artists.map(toTw!), songs.map(toTw!), videoDur, !!hint) }))
+      .map((c) => ({ c, sc: scoreCand(tw(c), artists.map(toTw!), songs.map(toTw!), videoDur, known.length > 0) }))
       .filter((x) => x.sc >= 2.2)
       .sort((a, b) => b.sc - a.sc);
   let list = ranked();

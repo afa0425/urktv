@@ -153,7 +153,7 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
     triedLyrics.current = lyricKey;
     let off = false;
     const go = () =>
-      findLyrics(title, transport.current?.duration() || 0, hint).then((hit) => {
+      findLyrics(song.mv || title, transport.current?.duration() || 0, hint).then((hit) => {
         if (off) return;
         if (!hit) {
           if (staleAuto) removeChart();
@@ -411,7 +411,7 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
     if (!saved || lyricBusy) return;
     setLyricBusy(true);
     const alt = (saved.alt ?? 0) + 1;
-    findLyrics(title, transport.current?.duration() || 0, hint, alt)
+    findLyrics(song.mv || title, transport.current?.duration() || 0, hint, alt)
       .then((hit) => {
         if (!hit) return;
         manualLyrics.current = false;
