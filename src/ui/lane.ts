@@ -1,3 +1,4 @@
+import { drawBackdrop } from './dualLane';
 import type { Note } from '../core/chart';
 import { midiName } from '../audio/pitch';
 
@@ -13,6 +14,8 @@ export interface LaneState {
 }
 
 export interface LaneInput {
+  /** How loud the singer is (0-1): the backdrop breathes with it. */
+  level?: number;
   now: number;
   trace: TracePoint[];
   /** Target melody, or null in free mode. */
@@ -93,6 +96,7 @@ export function drawLane(ctx: CanvasRenderingContext2D, w: number, h: number, s:
   s.center += (want - s.center) * 0.06;
 
   ctx.clearRect(0, 0, w, h);
+  drawBackdrop(ctx, w, h, i.level);
 
   // pitch grid, one line per semitone, C's labelled
   ctx.font = '11px system-ui, sans-serif';

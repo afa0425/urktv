@@ -913,6 +913,8 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
           highlights: L.layered?.highlights ?? (liveBars && notes ? liveHighs(notes) : undefined),
           syl: sylNear(tc),
           knownTo: liveBars ? liveNotes.current.edge - L.offset : undefined,
+          level: frame.level,
+          combo: coach.current.combo,
         });
       } else {
         drawLane(ctx, cv.clientWidth, cv.clientHeight, lane.current, {
@@ -921,6 +923,7 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
           notes,
           transpose: L.transpose,
           live: frame.midi,
+          level: frame.level,
         });
       }
 
@@ -1294,6 +1297,7 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
             ) : (
               <p className="lyric-next">{chart ? '♪' : ytPlain && phase === 'live' ? '這首歌還沒找到歌詞' : ''}</p>
             )}
+            {verdict && <i key={'f' + verdict.id} className={'ktv-flash ' + verdict.cls} aria-hidden="true" />}
             {verdict && (
               <span key={verdict.id} className={'verdict ' + verdict.cls}>
                 {verdict.text}

@@ -25,7 +25,57 @@ export interface DualInput {
   syl?: { start: number; end: number; text: string }[];
   /** Bars made live: known only up to this time. The lane shows no further, so it is never half empty. */
   knownTo?: number;
+  /** How loud the singer is right now (0-1): the backdrop breathes with it. */
+  level?: number;
+  /** Notes hit in a row: shown big on the lane. */
+  combo?: number;
 }
+
+let lvl = 0;
+/**
+ * The lane's backdrop: slow waves of light that swell with the singer's voice, so the lane is alive
+ * even where there is nothing to sing.
+ */
+export function drawBackdrop(ctx: CanvasRenderingContext2D, w: number, h: number, level = 0) {
+  const t = performance.now() / 1000;
+  lvl += (Math.min(1, level * 1.6) - lvl) * 0.12;
+  const layers: [number, number, number, string][] = [
+    [0.55, 0.9, 0.0, '255,92,138'],
+    [0.75, 1.3, 2.1, '140,100,255'],
+    [1.0, 0.7, 4.2, '70,220,255'],
+  ];
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (const [freq, speed, ph, rgb] of layers) {
+    const amp = h * (0.07 + 0.2 * lvl);
+    const base = h * 0.78;
+    ctx.beginPath();
+    ctx.moveTo(0, h);
+    for (let x = 0; x <= w; x += 16) {
+      const k = (x / w) * Math.PI * 2 * freq;
+      ctx.lineTo(x, base - amp * (Math.sin(k * 2 + t * speed + ph) * 0.6 + Math.sin(k * 5 - t * speed * 0.7 + ph) * 0.4) - amp);
+    }
+    ctx.lineTo(w, h);
+    ctx.closePath();
+    const g = ctx.createLinearGradient(0, base - amp * 2, 0, h);
+    g.addColorStop(0, `rgba(${rgb},${0.1 + 0.22 * lvl})`);
+    g.addColorStop(1, `rgba(${rgb},0)`);
+    ctx.fillStyle = g;
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+interface Ring {
+  x: number;
+  y: number;
+  life: number;
+  gold: boolean;
+}
+const rings: Ring[] = [];
+const burst = new Set<number>();
+let comboSeen = 0;
+let comboAt = 0;
 
 
 function rr(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
@@ -136,6 +186,17 @@ export function drawDualLane(ctx: CanvasRenderingContext2D, w: number, h: number
   }
 
   ctx.clearRect(0, 0, w, h);
+  drawBackdrop(ctx, w, laneH, i.level);
+  // the song moving past: a faint line every second
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+  ctx.lineWidth = 1;
+  for (let k = Math.ceil(i.now - past); k <= i.now + future; k++) {
+    const gx = Math.round(x(k)) + 0.5;
+    ctx.beginPath();
+    ctx.moveTo(gx, 0);
+    ctx.lineTo(gx, laneH);
+    ctx.stroke();
+  }
   // soft guides every other semitone, nothing louder
   ctx.strokeStyle = 'rgba(255,255,255,0.035)';
   ctx.lineWidth = 1;
@@ -168,7 +229,7 @@ export function drawDualLane(ctx: CanvasRenderingContext2D, w: number, h: number
   };
 
   // the original's notes: fat capsules
-  const bh = Math.max(14, Math.min(26, ((laneH - 2 * pad) / span) * 1.35));
+  const bh = Math.max(16, Math.min(30, ((laneH - 2 * pad) / span) * 1.65));
   ctx.save();
   ctx.beginPath();
   ctx.rect(0, 0, w, laneH);
@@ -183,7 +244,9 @@ export function drawDualLane(ctx: CanvasRenderingContext2D, w: number, h: number
     const gold = n.kind === 'golden';
     const now = n.start <= i.now && n.end >= i.now;
     // every pitch has its own colour (low = warm, high = cool), so the melody reads at a glance
-    const hue = (((n.midi + i.transpose) * 29) % 360 + 360) % 360;
+    // one family of colours, by height: low notes violet, high notes aqua (neon, never muddy)
+    const rel = Math.max(0, Math.min(1, (n.midi + i.transpose - s.center) / span + 0.5));
+    const hue = 292 - rel * 122;
     const high = (i.highlights ?? []).some((hl) => Math.abs(hl.start - n.start) < 0.05);
     const pulse = now ? 1 + 0.06 * Math.sin(t / 90) : 1;
     // a bar seen for the first time grows in over a third of a second
@@ -196,14 +259,31 @@ export function drawDualLane(ctx: CanvasRenderingContext2D, w: number, h: number
     const ph = bh * pulse * (0.4 + 0.6 * ease);
     const py = yy - (ph - bh) / 2;
     rr(ctx, x0, py, bw, ph, ph / 2);
-    // bars already sung keep their colour, dimmed (never a dead gray)
-    ctx.fillStyle = n.end < i.now ? `hsla(${hue},70%,55%,0.16)` : `hsla(${hue},85%,62%,${now ? 0.55 : 0.3})`;
-    if (now || high) {
-      ctx.shadowColor = gold ? 'rgba(255,210,90,0.9)' : `hsla(${hue},95%,65%,0.95)`;
-      ctx.shadowBlur = now ? 26 : 12;
+    // bars to come are solid neon; bars already sung keep their colour, dimmed
+    if (n.end < i.now) ctx.fillStyle = `hsla(${hue},60%,50%,0.2)`;
+    else {
+      const bg = ctx.createLinearGradient(0, py, 0, py + ph);
+      bg.addColorStop(0, `hsla(${hue},100%,${now ? 78 : 70}%,${now ? 1 : 0.92})`);
+      bg.addColorStop(1, `hsla(${hue + 18},95%,${now ? 56 : 46}%,${now ? 1 : 0.88})`);
+      ctx.fillStyle = bg;
+      ctx.shadowColor = gold ? 'rgba(255,210,90,0.95)' : `hsla(${hue},100%,62%,0.95)`;
+      ctx.shadowBlur = now ? 34 : high ? 22 : 14;
     }
     ctx.fill();
     ctx.shadowBlur = 0;
+    // a note that just ended and was sung on: it goes off
+    if (n.end < i.now && n.end > i.now - 0.25 && !burst.has(bk)) {
+      burst.add(bk);
+      if (hitIn(n) >= 0.5) {
+        const cy = yy + bh / 2;
+        rings.push({ x: nowX, y: cy, life: 1, gold });
+        for (let k = 0; k < 22; k++) {
+          const a = Math.random() * Math.PI * 2;
+          const v = 90 + Math.random() * 240;
+          sparks.push({ x: nowX, y: cy, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 0.45 + Math.random() * 0.55, hue: gold ? 45 : Math.random() < 0.5 ? 45 : hue });
+        }
+      }
+    }
     // a glint running across the bars still to come
     if (n.start > i.now && bw > 18) {
       const g0 = ((t / 1000) * 0.5 + n.start * 0.37) % 1;
@@ -236,7 +316,7 @@ export function drawDualLane(ctx: CanvasRenderingContext2D, w: number, h: number
           ctx.fillStyle = g;
           ctx.shadowColor = gold ? '#ffd54a' : `hsl(${hue},95%,60%)`;
           ctx.shadowBlur = 16;
-        } else ctx.fillStyle = 'rgba(255,255,255,0.12)';
+        } else ctx.fillStyle = 'rgba(255,255,255,0.16)';
         ctx.fill();
         ctx.shadowBlur = 0;
         ctx.restore();
@@ -244,8 +324,8 @@ export function drawDualLane(ctx: CanvasRenderingContext2D, w: number, h: number
     }
     // outline
     rr(ctx, x0, py, bw, ph, ph / 2);
-    ctx.strokeStyle = gold ? 'rgba(255,214,110,0.95)' : now ? '#fff' : n.end < i.now ? `hsla(${hue},80%,70%,0.32)` : `hsla(${hue},95%,78%,0.85)`;
-    ctx.lineWidth = gold || now ? 2 : 1.2;
+    ctx.strokeStyle = gold ? 'rgba(255,214,110,0.95)' : now ? '#fff' : n.end < i.now ? `hsla(${hue},80%,70%,0.3)` : 'rgba(255,255,255,0.55)';
+    ctx.lineWidth = gold || now ? 2.5 : 1.2;
     ctx.stroke();
     // what to sing on this bar: its lyric character(s); else a mark for special notes
     ctx.textBaseline = 'middle';
@@ -279,6 +359,7 @@ export function drawDualLane(ctx: CanvasRenderingContext2D, w: number, h: number
   ctx.globalAlpha = 1;
   lastSeenNow = i.now;
   if (born.size > 4000) born.clear();
+  if (burst.size > 4000) burst.clear();
   // the original's real pitch curve (prepared songs)
   if (i.curve) {
     const { hop, midi } = i.curve;
@@ -313,20 +394,29 @@ export function drawDualLane(ctx: CanvasRenderingContext2D, w: number, h: number
       continue;
     }
     const age = Math.max(0, Math.min(1, 1 - (i.now - p.t) / 1.6));
-    ctx.strokeStyle = p.hit ? `rgba(120,255,200,${0.25 + age * 0.7})` : `rgba(255,180,120,${0.2 + age * 0.6})`;
-    ctx.lineWidth = 2 + age * 4;
+    ctx.strokeStyle = p.hit ? `rgba(255,236,150,${0.3 + age * 0.7})` : `rgba(255,255,255,${0.15 + age * 0.5})`;
+    ctx.lineWidth = 3 + age * 7;
+    ctx.shadowColor = p.hit ? 'rgba(255,200,80,0.9)' : 'rgba(255,255,255,0.4)';
+    ctx.shadowBlur = 14 * age;
     ctx.beginPath();
     ctx.moveTo(x(prev.t), y(prev.midi));
     ctx.lineTo(x(p.t), y(p.midi));
     ctx.stroke();
     prev = p;
   }
+  ctx.shadowBlur = 0;
   ctx.restore();
 
-  // now line
+  // now line: a beam of light
+  const beam = ctx.createLinearGradient(nowX - 26, 0, nowX + 26, 0);
+  beam.addColorStop(0, 'rgba(255,92,138,0)');
+  beam.addColorStop(0.5, `rgba(255,120,170,${0.16 + 0.2 * lvl})`);
+  beam.addColorStop(1, 'rgba(255,92,138,0)');
+  ctx.fillStyle = beam;
+  ctx.fillRect(nowX - 26, 0, 52, laneH);
   const ng = ctx.createLinearGradient(0, 0, 0, laneH);
   ng.addColorStop(0, 'rgba(255,92,138,0)');
-  ng.addColorStop(0.5, 'rgba(255,92,138,0.95)');
+  ng.addColorStop(0.5, 'rgba(255,255,255,0.95)');
   ng.addColorStop(1, 'rgba(255,179,71,0)');
   ctx.strokeStyle = ng;
   ctx.lineWidth = 2;
@@ -351,17 +441,17 @@ export function drawDualLane(ctx: CanvasRenderingContext2D, w: number, h: number
   if (singing && singing.midi !== null) {
     const yy = y(singing.midi);
     if (yy >= 0 && yy <= laneH) {
-      const col = singing.hit ? '#78ffc8' : '#ffb478';
-      const glow = ctx.createRadialGradient(nowX, yy, 0, nowX, yy, 22);
-      glow.addColorStop(0, singing.hit ? 'rgba(120,255,200,0.55)' : 'rgba(255,180,120,0.45)');
+      const col = singing.hit ? '#ffd84d' : '#ffffff';
+      const glow = ctx.createRadialGradient(nowX, yy, 0, nowX, yy, 34);
+      glow.addColorStop(0, singing.hit ? 'rgba(255,214,90,0.75)' : 'rgba(255,255,255,0.35)');
       glow.addColorStop(1, 'rgba(0,0,0,0)');
       ctx.fillStyle = glow;
       ctx.beginPath();
-      ctx.arc(nowX, yy, 22, 0, Math.PI * 2);
+      ctx.arc(nowX, yy, 34, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = '#fff';
       ctx.beginPath();
-      ctx.arc(nowX, yy, 6, 0, Math.PI * 2);
+      ctx.arc(nowX, yy, singing.hit ? 9 : 7, 0, Math.PI * 2);
       ctx.fill();
       ctx.strokeStyle = col;
       ctx.lineWidth = 3;
@@ -401,7 +491,53 @@ export function drawDualLane(ctx: CanvasRenderingContext2D, w: number, h: number
     ctx.fillText(label, hx + 14, 24);
   }
 
+  // rings where a note was sung through
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (let k = rings.length - 1; k >= 0; k--) {
+    const r = rings[k];
+    r.life -= dt * 2.2;
+    if (r.life <= 0) {
+      rings.splice(k, 1);
+      continue;
+    }
+    ctx.strokeStyle = r.gold ? `rgba(255,214,90,${r.life})` : `rgba(255,240,190,${r.life})`;
+    ctx.lineWidth = 1 + 5 * r.life;
+    ctx.beginPath();
+    ctx.arc(r.x, r.y, 12 + (1 - r.life) * 46, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  // the run of notes in a row, big, top right; it jumps each time it grows
+  const combo = i.combo ?? 0;
+  if (combo !== comboSeen) {
+    if (combo > comboSeen) comboAt = t;
+    comboSeen = combo;
+  }
+  if (combo >= 3) {
+    const pop = Math.max(0, 1 - (t - comboAt) / 260);
+    const size = Math.round(Math.min(46, laneH * 0.26) * (1 + 0.35 * pop));
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'top';
+    ctx.font = `italic 900 ${size}px system-ui, sans-serif`;
+    const cg = ctx.createLinearGradient(0, 8, 0, 8 + size);
+    cg.addColorStop(0, '#fff3b0');
+    cg.addColorStop(1, combo >= 10 ? '#ff5c8a' : '#ffb347');
+    ctx.fillStyle = cg;
+    ctx.shadowColor = combo >= 10 ? 'rgba(255,92,138,0.9)' : 'rgba(255,179,71,0.8)';
+    ctx.shadowBlur = 18 + 20 * pop;
+    ctx.fillText(String(combo), w - 92, 8);
+    ctx.font = 'italic 800 14px system-ui, sans-serif';
+    ctx.shadowBlur = 8;
+    ctx.fillText('COMBO', w - 16, 8 + size * 0.42);
+    ctx.shadowBlur = 0;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+  }
+  ctx.restore();
+
   // sparks
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
   for (let k = sparks.length - 1; k >= 0; k--) {
     const p = sparks[k];
     p.life -= dt;
@@ -414,10 +550,11 @@ export function drawDualLane(ctx: CanvasRenderingContext2D, w: number, h: number
     p.vy += 80 * dt;
     ctx.fillStyle = `hsla(${p.hue},95%,68%,${Math.min(1, p.life * 1.6)})`;
     ctx.beginPath();
-    ctx.arc(p.x, p.y, 2.4, 0, Math.PI * 2);
+    ctx.arc(p.x, p.y, 1.6 + 2.6 * Math.min(1, p.life), 0, Math.PI * 2);
     ctx.fill();
   }
-  if (sparks.length > 300) sparks.splice(0, sparks.length - 300);
+  ctx.restore();
+  if (sparks.length > 420) sparks.splice(0, sparks.length - 420);
 
   // the strip of your own notes: what you sang, coloured by how it went
   const sy = h - strip;

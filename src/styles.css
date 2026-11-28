@@ -2759,3 +2759,43 @@ a.btn {
     padding: 6px 12px;
   }
 }
+
+/* ---------- the high: a wash of light across the lyrics when a line lands, a taller lane ---------- */
+.ktv-flash {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0;
+  animation: ktvFlash 1s ease-out;
+}
+.ktv-flash.v-perfect { background: radial-gradient(60% 140% at 50% 50%, rgba(255, 213, 74, 0.5), transparent 70%); }
+.ktv-flash.v-great { background: radial-gradient(60% 140% at 50% 50%, rgba(93, 242, 182, 0.36), transparent 70%); }
+.ktv-flash.v-good { background: radial-gradient(60% 140% at 50% 50%, rgba(143, 199, 255, 0.22), transparent 70%); }
+.ktv-flash.v-try { display: none; }
+@keyframes ktvFlash {
+  0% { opacity: 0; transform: scaleX(0.4); }
+  18% { opacity: 1; transform: scaleX(1); }
+  100% { opacity: 0; }
+}
+.stage.t3 .ktv-row {
+  position: relative;
+  z-index: 1;
+}
+.stage.t3 .screen .video {
+  max-height: 34vh;
+}
+.stage.t3 .screen .lane-wrap,
+.stage.t3 .screen .lane-wrap.dual {
+  height: 208px;
+  background: linear-gradient(180deg, #100b1d, #07050d);
+}
+@media (max-width: 900px) {
+  .stage.t3 .screen .lane-wrap,
+  .stage.t3 .screen .lane-wrap.dual {
+    height: 164px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ktv-flash { animation: none; }
+}
