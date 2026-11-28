@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { MicPitch } from '../audio/mic';
 import { midiName } from '../audio/pitch';
 import { lineAt, parseChart, type Chart, type Note } from '../core/chart';
-import { foldNear, FreeScorer, GuideScorer, type Difficulty, type ScoreExtras, type Scorer, type ScoreResult } from '../core/score';
+import { foldNear, FreeScorer, gradeOf, GuideScorer, type Difficulty, type ScoreExtras, type Scorer, type ScoreResult } from '../core/score';
 import { charts, DEMO_ID, renameSong, settings, useStore, type SavedChart, type Song } from '../core/store';
 import { demoChart, DualTransport, LocalTransport, SynthTransport, toUltraStar, YouTubeTransport, type Transport } from '../core/transport';
 import { extPost, LEAD, LITE_AHEAD, useExtension } from '../core/extension';
@@ -91,6 +91,28 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
   const [pops, setPops] = useState<{ id: number; text: string; kind: string }[]>([]);
   const [combo, setCombo] = useState(0);
   const popId = useRef(0);
+  // each lyric line gets a verdict when it ends (how much of it was sung on the bars)
+  const [verdict, setVerdict] = useState<{ id: number; text: string; cls: string } | null>(null);
+  const lineJudge = useRef({ done: new Set<number>(), stars: 0 });
+  const [stars, setStars] = useState(0);
+  // nothing but the song: the side column goes under the stage, the browser goes full screen
+  const [focus, setFocus] = useState(false);
+  const toggleFocus = () => {
+    const on = !focus;
+    setFocus(on);
+    try {
+      if (on) void document.documentElement.requestFullscreen?.();
+      else if (document.fullscreenElement) void document.exitFullscreen?.();
+    } catch {
+      /* no full screen here: the wide layout alone */
+    }
+  };
+  const [musicVol, setMusicVol] = useState(() => Number(localStorage.getItem('urktv.music') ?? 1));
+  const changeMusic = (v: number) => {
+    setMusicVol(v);
+    localStorage.setItem('urktv.music', String(v));
+    extPost({ type: 'volume', level: v } as any);
+  };
   const comboRef = useRef(0);
   const howlRef = useRef(false);
   const pop = (text: string, kind: string) => {
@@ -321,6 +343,8 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
     trace.current = [];
     coach.current = newCoach();
     liveJudge.current = { done: new Set(), run: 0, mids: new Map() };
+    lineJudge.current = { done: new Set(), stars: 0 };
+    setStars(0);
     setCombo(0);
   }, [chart, guide, cfg.difficulty, run]);
   useEffect(() => {
@@ -362,13 +386,13 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
     const tr: Transport = plain && backing
       ? new DualTransport(
           new YouTubeTransport(host, local!.video!.id, { muted: true, onError: ytErrCb }),
-          new YouTubeTransport(leadRef.current!, local!.video!.id, { onError: ytErrCb }),
+          new YouTubeTransport(leadRef.current!, local!.video!.id, { bare: true, onError: ytErrCb }),
           LEAD,
         )
       : ytPlain && backing
       ? new DualTransport(
           new YouTubeTransport(host, song.id, { muted: true, onError: ytErrCb, onTitle: (name) => setTitle(name) }),
-          new YouTubeTransport(leadRef.current!, song.id, { onError: ytErrCb }),
+          new YouTubeTransport(leadRef.current!, song.id, { bare: true, onError: ytErrCb }),
           LEAD,
         )
       : plain
@@ -613,6 +637,33 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
   };
 
   useEffect(() => () => mic.current.stop(), []);
+  // keys: space play/pause, 1 2 3 original/guide/backing, up/down key, F full screen
+  const keyRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  keyRef.current = (e) => {
+    const el = e.target as HTMLElement | null;
+    if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) && (el as HTMLInputElement).type !== 'range') return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const k = e.key.toLowerCase();
+    if (k === 'f') toggleFocus();
+    else if (phase !== 'live') return;
+    else if (k === ' ') hud.playing ? transport.current?.pause() : transport.current?.play();
+    else if (k === '1') vocalPreset(1);
+    else if (k === '2') vocalPreset(guideLvl);
+    else if (k === '3') vocalPreset(0);
+    else if (k === 'arrowup' && backing) changeLiveKey(key + 1);
+    else if (k === 'arrowdown' && backing) changeLiveKey(key - 1);
+    else return;
+    e.preventDefault();
+  };
+  useEffect(() => {
+    const on = (e: KeyboardEvent) => keyRef.current(e);
+    window.addEventListener('keydown', on);
+    return () => window.removeEventListener('keydown', on);
+  }, []);
+  useEffect(() => {
+    if (phase === 'live' && backing && musicVol !== 1) extPost({ type: 'volume', level: musicVol } as any);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, backing]);
   const [howl, setHowl] = useState(false);
   // hearing yourself follows the settings while the mic runs
   useEffect(() => {
@@ -810,6 +861,39 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
         if (c.combo !== comboRef.current) {
           comboRef.current = c.combo;
           setCombo(c.combo);
+        }
+      }
+
+      // a lyric line just ended: how did it go?
+      if (playing && L.chart?.lines.length) {
+        const LJ = lineJudge.current;
+        const tl2 = time - L.offset;
+        for (let j = 0; j < L.chart.lines.length; j++) {
+          const ln = L.chart.lines[j];
+          if (!ln.text.trim()) continue;
+          const end = Math.min(ln.end, ln.start + sungDur(ln.text));
+          if (end > tl2 - L.latency - 0.25) break;
+          if (LJ.done.has(j)) continue;
+          LJ.done.add(j);
+          if (end < tl2 - 3) continue; // jumped past it
+          let tot = 0;
+          let sung = 0;
+          let hit = 0;
+          for (const p of trace.current) {
+            if (p.t < ln.start - 0.2 || p.t > end + 0.2) continue;
+            tot++;
+            if (p.midi !== null) sung++;
+            if (p.hit) hit++;
+          }
+          if (tot < 5 || sung / tot < 0.15) continue; // did not sing this one: say nothing
+          // with bars to follow: how much of the singing was on them; without: how much of the line was sung
+          const r = notes ? hit / Math.max(1, sung) : (sung / tot) * 0.8;
+          const v = r >= 0.7 ? ['完美！', 'v-perfect'] : r >= 0.45 ? ['很棒', 'v-great'] : r >= 0.2 ? ['不錯', 'v-good'] : ['加油', 'v-try'];
+          if (r >= 0.45) {
+            LJ.stars += r >= 0.7 ? 2 : 1;
+            setStars(LJ.stars);
+          }
+          setVerdict({ id: j, text: v[0], cls: v[1] });
         }
       }
 
@@ -1019,12 +1103,19 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
     coach.current.idx = Math.max(0, notes.findIndex((n) => n.end >= tc));
     coach.current.combo = 0;
   };
-  const firstVoice = () => {
+  /** A long stretch with nothing to sing ahead (the intro, an interlude): where to jump to skip it. */
+  const gapSkip = () => {
     const c = live.current.chart;
-    const first = c?.lines[0]?.start ?? c?.notes[0]?.start;
-    return first !== undefined ? Math.max(0, first + live.current.offset - 3) : null;
+    if (!c?.lines.length) return null;
+    const off = live.current.offset;
+    const now = hud.time - off;
+    const k = c.lines.findIndex((l) => l.text.trim() && l.start > now);
+    if (k < 0) return null;
+    const prev = c.lines.slice(0, k).reverse().find((l) => l.text.trim());
+    const prevEnd = prev ? Math.min(prev.end, prev.start + sungDur(prev.text)) : -99;
+    if (c.lines[k].start - now < 9 || now < prevEnd + 1) return null;
+    return { to: Math.max(0, c.lines[k].start + off - 3), intro: !prev };
   };
-
   const restart = () => {
     setPhase('ready');
     setHud((h) => ({ ...h, score: 0, time: 0, playing: false }));
@@ -1096,7 +1187,7 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
   };
 
   return (
-    <div className="stage neon t3">
+    <div className={'stage neon t3' + (focus ? ' focus' : '')}>
       <div className="beams" aria-hidden="true">
         <i />
         <i />
@@ -1113,13 +1204,22 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
               🔥 連中 ×{combo}
             </span>
           )}
+          {stars > 0 && (
+            <span className="hud-stars" title="唱得好的句子累積的星星">
+              ⭐ {stars}
+            </span>
+          )}
           <span className="hud-score">
             <small>{t('stage.score')}</small>
             <b>{Math.round(hud.score)}</b>
+            {hud.score >= 40 && <em className="hud-grade">{gradeOf(hud.score)}</em>}
           </span>
           <span className="hud-mic" title="麥克風收到的音量">
             <i style={{ height: `${Math.round(Math.min(1, hud.level) * 100)}%` }} />
           </span>
+          <button className="btn ghost small hud-focus" onClick={toggleFocus} title="專注模式：全螢幕、只留唱歌畫面（F）">
+            {focus ? '⤢ 離開全螢幕' : '⛶ 全螢幕'}
+          </button>
         </div>
       </header>
       <NewVersion />
@@ -1189,6 +1289,11 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
             ) : (
               <p className="lyric-next">{chart ? '♪' : ytPlain && phase === 'live' ? '這首歌還沒找到歌詞' : ''}</p>
             )}
+            {verdict && (
+              <span key={verdict.id} className={'verdict ' + verdict.cls}>
+                {verdict.text}
+              </span>
+            )}
             {ytPlain && saved?.kind === 'lrc' && phase === 'live' && (
               <div className="ktv-nudge">
                 <button onClick={() => nudgeLyrics(-0.5)} title="歌詞比歌聲慢時按這個">
@@ -1239,11 +1344,14 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
                   />
                   <span className="seek-time">{fmt(hud.dur)}</span>
                   <button className="btn icon" onClick={() => seekTo(hud.time + 10)} aria-label="+10">⏩</button>
-                  {firstVoice() !== null && hud.time < (firstVoice() ?? 0) && (
-                    <button className="btn small" onClick={() => seekTo(firstVoice()!)}>
-                      {t('stage.skipIntro')}
-                    </button>
-                  )}
+                  {(() => {
+                    const g = gapSkip();
+                    return g ? (
+                      <button className="btn small skip-gap" onClick={() => seekTo(g.to)}>
+                        ⏭ {g.intro ? t('stage.skipIntro') : '跳過間奏'}
+                      </button>
+                    ) : null;
+                  })()}
                 </>
               )}
             </div>
@@ -1309,6 +1417,26 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
                   </button>
                 </div>
               )}
+              <details className="mixer">
+                <summary title="音樂、耳機裡自己的聲音、殘響">🎚 音量</summary>
+                <div className="mixer-pop">
+                  {backing && (
+                    <label>
+                      <span>🎵 音樂 {Math.round(musicVol * 100)}%</span>
+                      <input type="range" min={0} max={1.5} step={0.05} value={musicVol} onChange={(e) => changeMusic(Number(e.target.value))} />
+                    </label>
+                  )}
+                  <label>
+                    <span>🎤 聽到自己 {cfg.monitor ? Math.round(cfg.monitorVol * 100) + '%' : '關'}</span>
+                    <input type="range" min={0} max={1.5} step={0.05} value={cfg.monitor ? cfg.monitorVol : 0} onChange={(e) => setCfg({ monitor: Number(e.target.value) > 0, monitorVol: Number(e.target.value) || cfg.monitorVol })} />
+                  </label>
+                  <label>
+                    <span>✨ 殘響 {Math.round(cfg.echo * 100)}%</span>
+                    <input type="range" min={0} max={1} step={0.05} value={cfg.echo} onChange={(e) => setCfg({ echo: Number(e.target.value) })} />
+                  </label>
+                  <small className="muted">聽到自己建議戴耳機，才不會回授。</small>
+                </div>
+              </details>
               {!ext.present && (
                 <p className="muted small sing-mode-note">
                   導唱、伴唱、升降 Key 要裝免費擴充功能（電腦 Chrome）·{' '}
@@ -1475,9 +1603,11 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
                 <>
                   {/* the lead player must stay visible and uncovered (YouTube rules): it sits here, not over the MV */}
                   <div className="lead-box" title={t('ext.leadTitle')}>
-                    <span className="lead-label">🎧 伴奏的聲音來源</span>
+                    <span className="lead-label">
+                      <i className="ai-dot" /> AI 即時計算中
+                    </span>
                     <div className="lead-host" ref={leadRef} />
-                    <span className="lead-note">AI 從這個小視窗聽歌做伴奏，它會跑在前面一點</span>
+                    <span className="lead-note">AI 正從這裡聽歌、做出你的伴奏（會比畫面早幾秒）。不用操作它。</span>
                   </div>
                   {ext.status && (
                     <small className="muted">

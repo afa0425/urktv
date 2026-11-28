@@ -61,6 +61,8 @@ function loadYouTubeApi(): Promise<any> {
 export interface YouTubeEvents {
   /** Picture only: the sound comes from our own tracks. */
   muted?: boolean;
+  /** No buttons of its own (the small player the engine listens to: the singer has nothing to do there). */
+  bare?: boolean;
   onReady?(): void;
   onTitle?(title: string): void;
   /** 2 bad id, 5 player error, 100 removed/private, 101/150 embedding disabled, -1 API did not load */
@@ -95,7 +97,9 @@ export class YouTubeTransport implements Transport {
           height: '100%',
           playerVars: ev.muted
             ? { playsinline: 1, rel: 0, modestbranding: 1, mute: 1, controls: 0, disablekb: 1, fs: 0, iv_load_policy: 3 }
-            : { playsinline: 1, rel: 0, modestbranding: 1 },
+            : ev.bare
+              ? { playsinline: 1, rel: 0, modestbranding: 1, controls: 0, disablekb: 1, fs: 0, iv_load_policy: 3 }
+              : { playsinline: 1, rel: 0, modestbranding: 1 },
           events: {
             onReady: () => {
               if (ev.muted) this.player?.mute?.();

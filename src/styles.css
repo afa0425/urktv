@@ -2334,3 +2334,134 @@ a.btn {
   line-height: 1.4;
   color: var(--muted);
 }
+
+/* ---------- singing features: line verdicts, stars and grade, mixer, full screen ---------- */
+.hud-stars {
+  font-weight: 800;
+  color: #ffd54a;
+  white-space: nowrap;
+}
+.hud-grade {
+  font-style: normal;
+  font-weight: 900;
+  font-size: 1rem;
+  padding: 0 8px;
+  border-radius: 8px;
+  color: #1a0f16;
+  background: linear-gradient(90deg, #ffd54a, #ffb347);
+}
+.hud-focus {
+  white-space: nowrap;
+}
+.verdict {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 2;
+  padding: 2px 22px;
+  border-radius: 99px;
+  font-size: clamp(1.3rem, 2.4vw, 2rem);
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  pointer-events: none;
+  background: rgba(8, 6, 13, 0.72);
+  border: 2px solid currentColor;
+  animation: verdict 1.5s ease-out forwards;
+}
+.v-perfect { color: #ffd54a; text-shadow: 0 0 18px rgba(255, 213, 74, 0.9); }
+.v-great { color: #5df2b6; text-shadow: 0 0 14px rgba(93, 242, 182, 0.7); }
+.v-good { color: #8fc7ff; }
+.v-try { color: #c9c2dc; border-width: 1px; font-size: 1.1rem; }
+@keyframes verdict {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
+  12% { opacity: 1; transform: translate(-50%, -50%) scale(1.18); }
+  22% { transform: translate(-50%, -50%) scale(1); }
+  75% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -90%) scale(1); }
+}
+.skip-gap {
+  white-space: nowrap;
+  border-color: rgba(255, 179, 71, 0.6);
+  color: #ffd6a0;
+}
+.mixer {
+  position: relative;
+}
+.mixer > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 7px 14px;
+  border-radius: 99px;
+  font-size: 0.92rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  white-space: nowrap;
+}
+.mixer > summary::-webkit-details-marker {
+  display: none;
+}
+.mixer[open] > summary {
+  border-color: rgba(255, 92, 138, 0.6);
+}
+.mixer-pop {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 5;
+  width: 250px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 14px;
+  background: #1a1426;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+}
+.mixer-pop label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+}
+.ai-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 4px;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 8px var(--ok);
+  animation: aiDot 1.2s ease-in-out infinite;
+}
+@keyframes aiDot {
+  50% { opacity: 0.25; }
+}
+/* the singer has nothing to do in the small player */
+.stage.t3 .lead-host iframe {
+  pointer-events: none;
+}
+.stage.t3.focus .stage-grid {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 1500px;
+}
+.stage.t3.focus .screen .video {
+  max-height: 54vh;
+}
+.stage.t3.focus .stage-side {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+.stage.t3.focus .stage-side > * {
+  flex: 1 1 240px;
+  max-width: 320px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .verdict { animation-duration: 1.5s; animation-name: verdictPlain; }
+  .ai-dot { animation: none; }
+}
+@keyframes verdictPlain {
+  0%, 80% { opacity: 1; transform: translate(-50%, -50%); }
+  100% { opacity: 0; transform: translate(-50%, -50%); }
+}

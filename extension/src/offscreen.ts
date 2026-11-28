@@ -1085,6 +1085,9 @@ chrome.runtime.onMessage.addListener((m: any, _s: unknown, reply: (x: unknown) =
     }
   } else if ((msg as any).type === 'key') {
     setKey((msg as any).semitones);
+  } else if ((msg as any).type === 'volume') {
+    // the music's loudness (backing and guide vocal together)
+    mix.gain.setTargetAtTime(Math.max(0, Math.min(1.5, Number((msg as any).level) || 0)), ctx.currentTime, 0.03);
   } else if (msg.type === 'vocal') {
     vocGain.gain.setTargetAtTime(msg.level, ctx.currentTime, 0.03);
     S.vocal = msg.level;
