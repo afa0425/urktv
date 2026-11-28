@@ -22,6 +22,7 @@ import { loadSheet, shareBars, shareLyricTiming, unpackBars, type Sheet } from '
 import { loadPitch, savePitch } from '../core/songCache';
 import { drawDualLane, meanOffset, type DualState } from './dualLane';
 import { useT, type I18nKey } from '../i18n';
+import { Icon } from './icons';
 import { drawLane, nearestNote, type LaneState, type TracePoint } from './lane';
 
 interface Props {
@@ -97,6 +98,7 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
   const [stars, setStars] = useState(0);
   // nothing but the song: the side column goes under the stage, the browser goes full screen
   const [focus, setFocus] = useState(false);
+  const [tools, setTools] = useState(false);
   const toggleFocus = () => {
     const on = !focus;
     setFocus(on);
@@ -1194,19 +1196,20 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
         <i />
       </div>
       <header className="stage-top">
-        <button className="btn ghost" onClick={onExit}>
-          ← {t('stage.back')}
+        <button className="btn ghost back-btn" onClick={onExit}>
+          <Icon name="left" size={18} />
+          {t('stage.back')}
         </button>
         <h1 className="stage-title">{isDemo ? t('stage.demoTitle') : title}</h1>
         <div className="hud">
           {combo >= 3 && (
             <span key={combo} className={'hud-combo' + (combo >= 10 ? ' hot' : '')}>
-              🔥 連中 ×{combo}
+              連中 <b>×{combo}</b>
             </span>
           )}
           {stars > 0 && (
             <span className="hud-stars" title="唱得好的句子累積的星星">
-              ⭐ {stars}
+              <Icon name="star" size={16} /> {stars}
             </span>
           )}
           <span className="hud-score">
@@ -1218,7 +1221,8 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
             <i style={{ height: `${Math.round(Math.min(1, hud.level) * 100)}%` }} />
           </span>
           <button className="btn ghost small hud-focus" onClick={toggleFocus} title="專注模式：全螢幕、只留唱歌畫面（F）">
-            {focus ? '⤢ 離開全螢幕' : '⛶ 全螢幕'}
+            <Icon name={focus ? 'min' : 'max'} size={16} />
+            {focus ? '離開全螢幕' : '全螢幕'}
           </button>
         </div>
       </header>
@@ -1253,8 +1257,9 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
             {own && !local && !localErr && <div className="overlay">{t('mine.loading')}</div>}
             {phase === 'ready' && !ytErr && (!own || local) && (
               <div className="overlay">
-                <button className="btn primary big" onClick={() => start(true)}>
-                  🎤 {t('stage.start')}
+                <button className="btn primary big start-btn" onClick={() => start(true)}>
+                  <Icon name="mic" size={24} />
+                  {t('stage.start')}
                 </button>
                 <p className="muted">{t('stage.startHint')}</p>
                 <button className="btn link" onClick={() => start(false)}>
@@ -1297,12 +1302,16 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
             {ytPlain && saved?.kind === 'lrc' && phase === 'live' && (
               <div className="ktv-nudge">
                 <button onClick={() => nudgeLyrics(-0.5)} title="歌詞比歌聲慢時按這個">
-                  ⏪ 歌詞早一點
+                  歌詞早一點
                 </button>
                 <button onClick={() => nudgeLyrics(0.5)} title="歌詞比歌聲快時按這個">
-                  歌詞晚一點 ⏩
+                  歌詞晚一點
                 </button>
-                {saved.shared && <span title="別的歌手已經對好這支 MV 的歌詞時間">✓ 已對好時間</span>}
+                {saved.shared && (
+                  <span title="別的歌手已經對好這支 MV 的歌詞時間">
+                    <Icon name="check" size={13} /> 已對好時間
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -1319,125 +1328,155 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
             </div>
           </div>
           </div>
-          {phase === 'live' && (
-            <div className="stage-bar">
-              <button className="btn icon play" onClick={() => (hud.playing ? transport.current?.pause() : transport.current?.play())} aria-label={hud.playing ? t('stage.pause') : t('stage.resume')}>
-                {hud.playing ? '❚❚' : '▶'}
-              </button>
-              {!isDemo && (
-                <>
-                  <button className="btn icon" onClick={() => seekTo(hud.time - 10)} aria-label="-10">⏪</button>
-                  <span className="seek-time">{fmt(drag ?? hud.time)}</span>
-                  <input
-                    className="seek"
-                    type="range"
-                    min={0}
-                    max={Math.max(1, Math.floor(hud.dur))}
-                    step={1}
-                    value={drag ?? Math.floor(hud.time)}
-                    aria-label={t('stage.seek')}
-                    style={{ ['--p' as string]: `${hud.dur ? ((drag ?? hud.time) / hud.dur) * 100 : 0}%` } as React.CSSProperties}
-                    onChange={(e) => setDrag(Number(e.target.value))}
-                    onPointerUp={() => drag !== null && (seekTo(drag), setDrag(null))}
-                    onKeyUp={() => drag !== null && (seekTo(drag), setDrag(null))}
-                    onBlur={() => setDrag(null)}
-                  />
-                  <span className="seek-time">{fmt(hud.dur)}</span>
-                  <button className="btn icon" onClick={() => seekTo(hud.time + 10)} aria-label="+10">⏩</button>
-                  {(() => {
-                    const g = gapSkip();
-                    return g ? (
-                      <button className="btn small skip-gap" onClick={() => seekTo(g.to)}>
-                        ⏭ {g.intro ? t('stage.skipIntro') : '跳過間奏'}
+          {(phase === 'live' || (ytAny && !backingFailed)) && (
+            <div className="console">
+              {phase === 'live' && (
+                <div className="c-transport">
+                  <button className="c-play" onClick={() => (hud.playing ? transport.current?.pause() : transport.current?.play())} aria-label={hud.playing ? t('stage.pause') : t('stage.resume')}>
+                    <Icon name={hud.playing ? 'pause' : 'play'} size={22} />
+                  </button>
+                  {!isDemo && (
+                    <>
+                      <button className="c-ic" onClick={() => seekTo(hud.time - 10)} aria-label="-10" title="倒退 10 秒">
+                        <Icon name="back" />
                       </button>
-                    ) : null;
-                  })()}
-                </>
-              )}
-            </div>
-          )}
-          {ytAny && !backingFailed && (
-            <div className="sing-mode">
-              <div className="seg big" role="radiogroup" aria-label="原唱、導唱或伴唱">
-                {(
-                  [
-                    ['🎤 原唱', 1],
-                    ['🎙️ 導唱', guideLvl],
-                    ['🎶 伴唱', 0],
-                  ] as const
-                ).map(([label, v]) => {
-                  const on = backing ? Math.abs(vocal - v) < 0.01 : v === 1;
-                  return (
-                    <button key={label} role="radio" aria-checked={on} disabled={v !== 1 && !ext.present} className={'seg-btn' + (on ? ' on' : '')} onClick={() => vocalPreset(v)}>
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
-              {backing && (
-                <label className="vocal-slider" title="原唱人聲大小：拉到你喜歡的導唱程度">
-                  <span>人聲 {Math.round(vocal * 100)}%</span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    value={vocal}
-                    style={{ ['--p' as string]: `${vocal * 100}%` } as React.CSSProperties}
-                    onChange={(e) => {
-                      const v = Number(e.target.value);
-                      changeVocal(v);
-                      // a level between the ends becomes this singer's guide level
-                      if (v > 0.02 && v < 0.98) {
-                        setGuideLvl(v);
-                        localStorage.setItem('urktv.guide', String(v));
-                      }
-                    }}
-                  />
-                </label>
-              )}
-              {backing && (
-                <div className="seg small-seg" role="radiogroup" aria-label="去人聲品質">
-                  <button role="radio" aria-checked={!hq} className={'seg-btn' + (!hq ? ' on' : '')} onClick={() => (setHqAsk(false), setQuality(false))}>
-                    一般
-                  </button>
-                  <button role="radio" aria-checked={hq} className={'seg-btn' + (hq ? ' on' : '')} onClick={() => !hq && setHqAsk(true)}>
-                    ✨ 高品質
-                  </button>
-                </div>
-              )}
-              {backing && (
-                <div className="key-ctl" title="升降 Key：伴奏、導唱、灰條一起移">
-                  <button className="btn icon" onClick={() => changeLiveKey(key - 1)} disabled={key <= -6} aria-label="降 Key">
-                    ♭
-                  </button>
-                  <span>Key {key > 0 ? '+' : ''}{key}</span>
-                  <button className="btn icon" onClick={() => changeLiveKey(key + 1)} disabled={key >= 6} aria-label="升 Key">
-                    ♯
-                  </button>
-                </div>
-              )}
-              <details className="mixer">
-                <summary title="音樂、耳機裡自己的聲音、殘響">🎚 音量</summary>
-                <div className="mixer-pop">
-                  {backing && (
-                    <label>
-                      <span>🎵 音樂 {Math.round(musicVol * 100)}%</span>
-                      <input type="range" min={0} max={1.5} step={0.05} value={musicVol} onChange={(e) => changeMusic(Number(e.target.value))} />
-                    </label>
+                      <span className="seek-time">{fmt(drag ?? hud.time)}</span>
+                      <input
+                        className="seek"
+                        type="range"
+                        min={0}
+                        max={Math.max(1, Math.floor(hud.dur))}
+                        step={1}
+                        value={drag ?? Math.floor(hud.time)}
+                        aria-label={t('stage.seek')}
+                        style={{ ['--p' as string]: `${hud.dur ? ((drag ?? hud.time) / hud.dur) * 100 : 0}%` } as React.CSSProperties}
+                        onChange={(e) => setDrag(Number(e.target.value))}
+                        onPointerUp={() => drag !== null && (seekTo(drag), setDrag(null))}
+                        onKeyUp={() => drag !== null && (seekTo(drag), setDrag(null))}
+                        onBlur={() => setDrag(null)}
+                      />
+                      <span className="seek-time">{fmt(hud.dur)}</span>
+                      <button className="c-ic" onClick={() => seekTo(hud.time + 10)} aria-label="+10" title="快轉 10 秒">
+                        <Icon name="fwd" />
+                      </button>
+                      {(() => {
+                        const g = gapSkip();
+                        return g ? (
+                          <button className="c-pill skip-gap" onClick={() => seekTo(g.to)}>
+                            <Icon name="skip" size={16} />
+                            {g.intro ? t('stage.skipIntro') : '跳過間奏'}
+                          </button>
+                        ) : null;
+                      })()}
+                    </>
                   )}
-                  <label>
-                    <span>🎤 聽到自己 {cfg.monitor ? Math.round(cfg.monitorVol * 100) + '%' : '關'}</span>
-                    <input type="range" min={0} max={1.5} step={0.05} value={cfg.monitor ? cfg.monitorVol : 0} onChange={(e) => setCfg({ monitor: Number(e.target.value) > 0, monitorVol: Number(e.target.value) || cfg.monitorVol })} />
-                  </label>
-                  <label>
-                    <span>✨ 殘響 {Math.round(cfg.echo * 100)}%</span>
-                    <input type="range" min={0} max={1} step={0.05} value={cfg.echo} onChange={(e) => setCfg({ echo: Number(e.target.value) })} />
-                  </label>
-                  <small className="muted">聽到自己建議戴耳機，才不會回授。</small>
                 </div>
-              </details>
-              {!ext.present && (
+              )}
+              {ytAny && !backingFailed && (
+                <div className="c-row sing-mode">
+                  <div className="c-group">
+                    <span className="c-label">人聲</span>
+                    <div className="c-seg" role="radiogroup" aria-label="原唱、導唱或伴唱">
+                      {(
+                        [
+                          ['原唱', 1],
+                          ['導唱', guideLvl],
+                          ['伴唱', 0],
+                        ] as const
+                      ).map(([label, v]) => {
+                        const on = backing ? Math.abs(vocal - v) < 0.01 : v === 1;
+                        return (
+                          <button key={label} role="radio" aria-checked={on} disabled={v !== 1 && !ext.present} className={on ? 'on' : ''} onClick={() => vocalPreset(v)}>
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {backing && (
+                      <label className="c-slide" title="原唱人聲大小：拉到你喜歡的導唱程度">
+                        <input
+                          type="range"
+                          min={0}
+                          max={1}
+                          step={0.05}
+                          value={vocal}
+                          aria-label="原唱人聲大小"
+                          style={{ ['--p' as string]: `${vocal * 100}%` } as React.CSSProperties}
+                          onChange={(e) => {
+                            const v = Number(e.target.value);
+                            changeVocal(v);
+                            // a level between the ends becomes this singer's guide level
+                            if (v > 0.02 && v < 0.98) {
+                              setGuideLvl(v);
+                              localStorage.setItem('urktv.guide', String(v));
+                            }
+                          }}
+                        />
+                        <span>{Math.round(vocal * 100)}%</span>
+                      </label>
+                    )}
+                  </div>
+                  {backing && (
+                    <div className="c-group" title="升降 Key：伴奏、導唱、灰條一起移（↑ ↓）">
+                      <span className="c-label">音調</span>
+                      <div className="c-step">
+                        <button onClick={() => changeLiveKey(key - 1)} disabled={key <= -6} aria-label="降 Key">
+                          <Icon name="minus" size={16} />
+                        </button>
+                        <b>{key === 0 ? '原調' : (key > 0 ? '+' : '') + key}</b>
+                        <button onClick={() => changeLiveKey(key + 1)} disabled={key >= 6} aria-label="升 Key">
+                          <Icon name="plus" size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {backing && (
+                    <div className="c-group">
+                      <span className="c-label">伴奏音質</span>
+                      <div className="c-seg" role="radiogroup" aria-label="去人聲品質">
+                        <button role="radio" aria-checked={!hq} className={!hq ? 'on' : ''} onClick={() => (setHqAsk(false), setQuality(false))}>
+                          一般
+                        </button>
+                        <button role="radio" aria-checked={hq} className={hq ? 'on' : ''} onClick={() => !hq && setHqAsk(true)}>
+                          高品質
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <div className="c-group c-end">
+                    <details className="mixer">
+                      <summary className="c-pill" title="音樂、耳機裡自己的聲音、殘響">
+                        <Icon name="sliders" size={17} />
+                        音量
+                      </summary>
+                      <div className="mixer-pop">
+                        {backing && (
+                          <label>
+                            <span>音樂 {Math.round(musicVol * 100)}%</span>
+                            <input type="range" min={0} max={1.5} step={0.05} value={musicVol} onChange={(e) => changeMusic(Number(e.target.value))} />
+                          </label>
+                        )}
+                        <label>
+                          <span>聽到自己 {cfg.monitor ? Math.round(cfg.monitorVol * 100) + '%' : '關'}</span>
+                          <input type="range" min={0} max={1.5} step={0.05} value={cfg.monitor ? cfg.monitorVol : 0} onChange={(e) => setCfg({ monitor: Number(e.target.value) > 0, monitorVol: Number(e.target.value) || cfg.monitorVol })} />
+                        </label>
+                        <label>
+                          <span>殘響 {Math.round(cfg.echo * 100)}%</span>
+                          <input type="range" min={0} max={1} step={0.05} value={cfg.echo} onChange={(e) => setCfg({ echo: Number(e.target.value) })} />
+                        </label>
+                        <small className="muted">聽到自己建議戴耳機，才不會回授。</small>
+                      </div>
+                    </details>
+                    {phase === 'live' && (
+                      <button className={'c-pill c-more' + (tools ? ' on' : '')} onClick={() => setTools(!tools)} aria-expanded={tools}>
+                        <Icon name="grid" size={17} />
+                        更多
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+              {!ext.present && ytAny && !backingFailed && (
                 <p className="muted small sing-mode-note">
                   導唱、伴唱、升降 Key 要裝免費擴充功能（電腦 Chrome）·{' '}
                   <a href="extension.html" target="_blank" rel="noopener">
@@ -1445,90 +1484,84 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
                   </a>
                 </p>
               )}
-            </div>
-          )}
-          {(ytAny || own) && phase === 'live' && (
-            <details className="tools-more">
-            <summary>🎛 更多：男女調 · 氣氛音效 · 變聲 · 換歌詞</summary>
-            <div className="ktv-tools">
-              <div className="tool-group" title="男生唱女生的歌按男調，女生唱男生的歌按女調">
-                <span className="tool-label">調性</span>
-                {(
-                  [
-                    ['♂ 男調', -5],
-                    ['原調', 0],
-                    ['♀ 女調', 5],
-                  ] as const
-                ).map(([label, k]) => (
-                  <button
-                    key={label}
-                    className={'chip-btn' + (key === k ? ' on' : '')}
-                    disabled={!backing && !own}
-                    onClick={() => (own ? changeKey(k) : changeLiveKey(k))}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              <div className="tool-group">
-                <span className="tool-label">氣氛</span>
-                {(Object.keys(SFX) as SfxKind[]).map((k) => (
-                  <button
-                    key={k}
-                    className="chip-btn sfx"
-                    title={SFX[k].label}
-                    onClick={() => {
-                      playSfx(k);
-                      pop(`${SFX[k].icon} ${SFX[k].label}`, 'praise');
-                    }}
-                  >
-                    {SFX[k].icon}
-                  </button>
-                ))}
-              </div>
-              {ytPlain && saved?.kind === 'lrc' && (
-                <div className="tool-group lyric-tools" title={`現在的歌詞：${saved.name ?? '網路歌詞'}`}>
-                  <span className="tool-label">歌詞</span>
-                  <button className="chip-btn" onClick={() => nudgeLyrics(-0.5)} title="歌詞比歌聲慢時按這個">
-                    ⏪ 早一點
-                  </button>
-                  <button className="chip-btn" onClick={() => nudgeLyrics(0.5)} title="歌詞比歌聲快時按這個">
-                    晚一點 ⏩
-                  </button>
-                  {saved.locked && (
-                    <button className="chip-btn" onClick={autoLyrics} title="交給電腦重新對時">
-                      自動對
-                    </button>
+              {tools && phase === 'live' && (ytAny || own) && (
+                <div className="c-tools">
+                  <div className="c-group" title="男生唱女生的歌按男調，女生唱男生的歌按女調">
+                    <span className="c-label">快速換調</span>
+                    <div className="c-seg">
+                      {(
+                        [
+                          ['男調', -5],
+                          ['原調', 0],
+                          ['女調', 5],
+                        ] as const
+                      ).map(([label, k]) => (
+                        <button key={label} className={key === k ? 'on' : ''} disabled={!backing && !own} onClick={() => (own ? changeKey(k) : changeLiveKey(k))}>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="c-group" title="聽自己的聲音時變聲（建議戴耳機）">
+                    <span className="c-label">變聲</span>
+                    <div className="c-seg">
+                      {(
+                        [
+                          ['本人', 0],
+                          ['可愛', 7],
+                          ['怪獸', -6],
+                        ] as const
+                      ).map(([label, v]) => (
+                        <button
+                          key={label}
+                          className={voiceFx === v ? 'on' : ''}
+                          onClick={() => {
+                            setVoiceFx(v);
+                            mic.current.setVoice(v);
+                            if (v !== 0 && !cfg.monitor) setCfg({ monitor: true });
+                          }}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="c-group">
+                    <span className="c-label">氣氛</span>
+                    <div className="c-sfx">
+                      {(Object.keys(SFX) as SfxKind[]).map((k) => (
+                        <button
+                          key={k}
+                          className="chip-btn sfx"
+                          title={SFX[k].label}
+                          onClick={() => {
+                            playSfx(k);
+                            pop(`${SFX[k].icon} ${SFX[k].label}`, 'praise');
+                          }}
+                        >
+                          {SFX[k].icon}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {ytPlain && saved?.kind === 'lrc' && (
+                    <div className="c-group lyric-tools" title={`現在的歌詞：${saved.name ?? '網路歌詞'}`}>
+                      <span className="c-label">歌詞</span>
+                      <div className="c-seg">
+                        {saved.locked && (
+                          <button onClick={autoLyrics} title="交給電腦重新對時">
+                            自動對時
+                          </button>
+                        )}
+                        <button onClick={otherLyrics} disabled={lyricBusy} title={`現在的歌詞：${saved.name ?? '網路歌詞'}。不是這首歌？換下一份`}>
+                          {lyricBusy ? '找歌詞中…' : '歌詞不對，換一份'}
+                        </button>
+                      </div>
+                    </div>
                   )}
-                  <button className="chip-btn" onClick={otherLyrics} disabled={lyricBusy} title={`現在的歌詞：${saved.name ?? '網路歌詞'}。不是這首歌？換下一份`}>
-                    {lyricBusy ? '找歌詞中…' : '不對，換一份'}
-                  </button>
                 </div>
               )}
-              <div className="tool-group" title="聽自己的聲音時變聲（建議戴耳機）">
-                <span className="tool-label">變聲</span>
-                {(
-                  [
-                    ['本人', 0],
-                    ['🐿️ 可愛', 7],
-                    ['👹 怪獸', -6],
-                  ] as const
-                ).map(([label, v]) => (
-                  <button
-                    key={label}
-                    className={'chip-btn' + (voiceFx === v ? ' on' : '')}
-                    onClick={() => {
-                      setVoiceFx(v);
-                      mic.current.setVoice(v);
-                      if (v !== 0 && !cfg.monitor) setCfg({ monitor: true });
-                    }}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
             </div>
-            </details>
           )}
           {hqAsk && (
             <div className="hq-ask">
@@ -1581,15 +1614,17 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
 
           {phase === 'live' && (
             <div className="card col">
-              <button className="btn primary" onClick={finish}>
+              <button className="btn primary with-ic" onClick={finish}>
+                <Icon name="flag" size={18} />
                 {t('stage.finish')}
               </button>
-              <button className="btn" onClick={restart}>
+              <button className="btn with-ic" onClick={restart}>
+                <Icon name="redo" size={18} />
                 {t('stage.restart')}
               </button>
               {onNext && (
                 <button className="btn" onClick={onNext} title="不看成績，直接唱下一首">
-                  ⏭ 切歌
+                  <Icon name="next" size={18} /> 切歌
                 </button>
               )}
               {nextTitle && <p className="muted small">{t('queue.next', { title: nextTitle })}</p>}
@@ -1659,7 +1694,7 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
           )}
 
           <details className="card col more-settings">
-            <summary>⚙️ 更多設定</summary>
+            <summary>進階設定</summary>
           <div className="card col">
             <label className="field">
               <span>{t('stage.difficulty')}</span>

@@ -17,7 +17,7 @@ const { chromium } = require('playwright');
   await p.waitForTimeout(1500);
   await p.getByRole('button', { name: /開始演唱/ }).first().click();
   for (const sec of [6, 12, 18, 24, 30, 40, 50]) {
-    if (sec === 6) { await p.getByRole('radio', { name: '🎶 伴唱' }).click(); await p.getByRole('radio', { name: '✨ 高品質' }).click(); await p.getByRole('button', { name: '確定用高品質' }).click(); }
+    if (sec === 6) { await p.getByRole('radio', { name: '伴唱' }).click(); await p.getByRole('radio', { name: '高品質' }).click(); await p.getByRole('button', { name: '確定用高品質' }).click(); }
     if (sec === 50) { console.log('engine:', JSON.stringify(await ctx.serviceWorkers()[0].evaluate(() => chrome.runtime.sendMessage({ to: 'engine-diag' })))); console.log('chooser:', (await p.locator('.sing-mode').innerText()).replace(/\n/g,' ')); }
     await p.waitForTimeout(6000);
     await p.locator('details.diag summary').click().catch(() => {});
