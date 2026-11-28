@@ -3,7 +3,7 @@
 // made by the singer's own machine, so the song starts at once the next time.
 const RATE = 44100;
 /** A stretch counts as kept only in whole blocks of this many samples (0.1 s). */
-const BLK = 4410;
+export const BLK = 4410;
 const DB = 'urktv-stems';
 /** Storage this cache may use; the songs sung longest ago go first. */
 const MAX_BYTES = 1500 * 1024 * 1024;

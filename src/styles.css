@@ -2302,3 +2302,35 @@ a.btn {
     animation: none;
   }
 }
+
+/* the small player the backing is made from: a tidy card of its own, not a black square */
+.stage.t3 .backing-card .lead-box {
+  width: 100%;
+  height: auto;
+  margin: 0;
+  border: 0;
+  background: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.stage.t3 .lead-label {
+  position: static;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.stage.t3 .lead-host {
+  position: relative;
+  inset: auto;
+  width: 100%;
+  height: 200px;
+  overflow: hidden;
+  background: #000;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+}
+.lead-note {
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: var(--muted);
+}

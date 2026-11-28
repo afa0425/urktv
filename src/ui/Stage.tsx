@@ -39,6 +39,9 @@ const LYRICS_V = 4;
 if (typeof location !== 'undefined' && /[?&]debug\b/.test(location.search)) (window as any).urktvFindLyrics = findLyrics;
 
 
+/** The lead player runs at most this far (seconds) before the singer presses start. */
+const PRE_MAX = 14;
+
 /** About how long a lyric line takes to sing (web lyrics only give when it starts). */
 const sungDur = (text: string) => Math.max(1, text.replace(/\s/g, '').length * 0.33 + 0.4);
 
@@ -138,7 +141,7 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
   }, [ext.present, ext.consent]);
   // get the light AI ready while the singer looks at the page (it is then instant on start)
   useEffect(() => {
-    if (backing) extPost({ type: 'preload', liteBase: MODEL_BASE });
+    if (backing) extPost({ type: 'preload', liteBase: MODEL_BASE, bgUrl: MODEL_BASE + MODELS.mid.file, bgModel: 'mid', ortBase: ORT_BASE });
   }, [backing]);
   const [backingFailed, setBackingFailed] = useState(false);
   const [drag, setDrag] = useState<number | null>(null);
@@ -266,6 +269,37 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
     }
   }, [sheet]);
   const rebuffering = useRef(false);
+  /** How far in front of the picture the lead runs with the light AI: what the head start gave (4 s at least). */
+  const leadGap = useRef(LITE_AHEAD);
+  /** The lead already runs and the engine already listens (before the singer pressed start). */
+  const prerolled = useRef(false);
+  // Head start: as soon as the song page is up, the small lead player starts and the engine listens.
+  // By the time the singer presses start there are seconds of backing ready (singing begins at once),
+  // and the cleaner mid-weight backing has the room it needs to be in time.
+  useEffect(() => {
+    if (phase !== 'ready' || !backing) return;
+    prerolled.current = false;
+    leadGap.current = LITE_AHEAD;
+    let tries = 0;
+    const id = window.setInterval(() => {
+      const tr = transport.current;
+      if (!(tr instanceof DualTransport) || !extRef.current.present) return;
+      if (!prerolled.current) {
+        // the song's length is known once the players are ready: the engine needs it
+        if (!(tr.duration() || tr.lead.duration()) && ++tries < 40) return;
+        if (tries >= 40) return window.clearInterval(id);
+        prerolled.current = true;
+        extRef.current.fellBack = false;
+        extPost(startMsg());
+        window.setTimeout(() => !tr.started && tr.lead.play(), 400);
+        return;
+      }
+      // far enough: the lead waits there for the singer
+      if (!tr.started && tr.lead.time() >= PRE_MAX && tr.lead.playing()) tr.lead.pause();
+    }, 250);
+    return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, backing, run, song.id, local]);
   const extRef = useRef(ext);
   extRef.current = ext;
 
@@ -522,7 +556,7 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
       `主畫面：${tr instanceof DualTransport ? `${tr.main.playing() ? '播放中' : '沒在播'} ${fmt2(tr.main.time())} 秒${tr.syncing() ? '（等待同步）' : ''}` : '-'}`,
       `擷取：${ext.tap === 'connected' ? '已接上' : ext.tap === 'blocked' ? '被瀏覽器擋住' : '還沒接上'}`,
       `引擎：${ext.status?.state ?? '-'} / ${ext.status?.mode ?? '-'}，速度 ${fmt2(ext.status?.speed)} 倍，領先 ${fmt2(ext.status?.buffered)} 秒`,
-      d.hq ? `乾淨伴奏（存在這台電腦）：已存 ${(d.hq as any).have}／${(d.hq as any).dur} 秒，這次用了 ${(d.hq as any).used} 秒，背景速度 ${fmt2((d.hq as any).bg)} 倍` : '',
+      d.hq ? `乾淨伴奏（存在這台電腦）：已存 ${(d.hq as any).have}／${(d.hq as any).dur} 秒，這次用了存好的 ${(d.hq as any).used} 秒、即時換上 ${(d.hq as any).live ?? 0} 秒，每次算 ${fmt2((d.hq as any).cost)} 秒，背景速度 ${fmt2((d.hq as any).bg)} 倍` : '',
       `收到聲音 ${d.blocks ?? '-'} 段（最後 ${fmt2(d.lastTap)} 秒），待播 ${d.segments ?? '-'} 段，已播 ${d.played ?? '-'} 段，重來 ${d.resets ?? '-'} 次`,
       d.ep ? `高品質模型跑在：${d.ep === 'wasm' ? 'CPU' : '顯示卡'}（實測 ${Object.entries(d.epTimes ?? {}).map(([k, v]) => `${k === 'wasm' ? 'CPU' : '顯示卡'} ${v}ms`).join('、') || '已記住'}）` : '',
       `引擎時鐘 ${fmt2(d.clock)} 秒（${d.playing ? '播放中' : '暫停'}），音訊 ${d.ctx ?? '-'}${d.err ? '，錯誤：' + d.err : ''}${ext.status?.message ? '，訊息：' + ext.status.message : ''}`,
@@ -855,7 +889,8 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
     const md = MODELS.kara2;
     // the video and its length: the high-quality backing worked out here is kept on this computer per video
     const vid = ytCat ? live.current.layered?.video?.id : song.id;
-    return { type: 'start', lead: LEAD, vocal: vocalRef.current, mode: engineMode(), modelUrl: MODEL_BASE + md.file, ortBase: ORT_BASE, model: 'kara2', liteBase: MODEL_BASE, bgUrl: MODEL_BASE + MODELS.mid.file, bgModel: 'mid', video: vid, dur: transport.current?.duration() || 0, bgAlways: /[?&]bgalways\b/.test(location.search) };
+    const tr0 = transport.current;
+    return { type: 'start', lead: LEAD, vocal: vocalRef.current, mode: engineMode(), modelUrl: MODEL_BASE + md.file, ortBase: ORT_BASE, model: 'kara2', liteBase: MODEL_BASE, bgUrl: MODEL_BASE + MODELS.mid.file, bgModel: 'mid', video: vid, dur: tr0?.duration() || (tr0 instanceof DualTransport ? tr0.lead.duration() : 0) || 0, bgAlways: /[?&]bgalways\b/.test(location.search) };
   };
   /** How far ahead the lead player should run, and how much backing to have before (re)starting. */
   const plan = (left: number) => {
@@ -865,7 +900,7 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
       return { ahead: n, resume: Math.min(n, 600) - 0.5 };
     }
     if (st?.mode === 'classic') return { ahead: 2, resume: 1.5 }; // light AI could not load
-    return { ahead: LITE_AHEAD, resume: 2 };
+    return { ahead: leadGap.current, resume: 2 };
   };
   /** Seconds of AI backing to have ready so it lasts `left` seconds of song at speed sp. */
   const aiNeed = (sp: number, left: number) => (sp >= 1.15 ? 8 : Math.min(600, left * (1 / sp - 1) + 8));
@@ -917,8 +952,14 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
     const tr = transport.current;
     if (tr instanceof DualTransport) {
       // the lead player starts first and the chosen model gets its head start
-      extRef.current.fellBack = false;
-      extPost(startMsg());
+      if (prerolled.current && engineMode() === 'lite' && tr.lead.time() > 0.5) {
+        // it already did, while the singer looked at the page: keep that distance through the song
+        leadGap.current = Math.max(LITE_AHEAD, Math.min(PRE_MAX + 1, tr.lead.time()));
+      } else {
+        if (prerolled.current) tr.lead.seek(0);
+        extRef.current.fellBack = false;
+        extPost(startMsg());
+      }
       let started = false;
       const t0 = performance.now();
       tr.startStaggered(
@@ -968,6 +1009,8 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
     if (!tr) return;
     const d = tr.duration() || 0;
     const to = Math.max(0, d ? Math.min(t, d - 1) : t);
+    // outside what the lead has heard the picture waits for the lead: only the short distance, not the long head start
+    if (tr instanceof DualTransport && !(to >= tr.main.time() && to <= tr.lead.time() - 1)) leadGap.current = LITE_AHEAD;
     tr.seek(to + (live.current.offset || 0) * 0);
     trace.current = [];
     if (scorer.current instanceof GuideScorer) scorer.current.skipped = true;
@@ -1432,8 +1475,9 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
                 <>
                   {/* the lead player must stay visible and uncovered (YouTube rules): it sits here, not over the MV */}
                   <div className="lead-box" title={t('ext.leadTitle')}>
-                    <span className="lead-label">{t('ext.lead')}</span>
+                    <span className="lead-label">🎧 伴奏的聲音來源</span>
                     <div className="lead-host" ref={leadRef} />
+                    <span className="lead-note">AI 從這個小視窗聽歌做伴奏，它會跑在前面一點</span>
                   </div>
                   {ext.status && (
                     <small className="muted">
@@ -1450,21 +1494,15 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
                     </small>
                   )}
                   {(() => {
-                    const h = (ext.status?.diag as any)?.hq as { have: number; dur: number; used: number } | null | undefined;
+                    const h = (ext.status?.diag as any)?.hq as { have: number; dur: number; used: number; live?: number } | null | undefined;
                     if (!h || !(h.dur > 0)) return null;
                     const pct = Math.min(100, Math.round((h.have / h.dur) * 100));
                     return (
                       <small className="hq-kept" title="更乾淨的伴奏是這台電腦自己算的，只存在這台電腦，不會上傳">
-                        {pct >= 97 ? '✨ 這首的乾淨伴奏已存在這台電腦，之後一開就有' : h.used > 0 ? `✨ 正在用這台電腦存好的乾淨伴奏（已存 ${pct}%）` : pct > 0 ? `✨ 邊唱邊在背景準備更乾淨的伴奏 ${pct}%（存在這台電腦，下次直接用）` : ''}
+                        {pct >= 97 ? '✨ 這首的乾淨伴奏已存在這台電腦，之後一開就有' : (h.live ?? 0) > 2 ? `✨ 正在播更乾淨的伴奏（邊唱邊算，已存 ${pct}%）` : h.used > 0 ? `✨ 正在用這台電腦存好的乾淨伴奏（已存 ${pct}%）` : pct > 0 ? `✨ 邊唱邊在背景準備更乾淨的伴奏 ${pct}%（存在這台電腦，下次直接用）` : ''}
                       </small>
                     );
                   })()}
-                  <label className="field">
-                    <span>
-                      {t('mine.vocal')} · {Math.round(vocal * 100)}%
-                    </span>
-                    <input type="range" min={0} max={1} step={0.05} value={vocal} onChange={(e) => changeVocal(Number(e.target.value))} />
-                  </label>
                 </>
               )}
               <details className="diag">
