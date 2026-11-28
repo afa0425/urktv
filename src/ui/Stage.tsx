@@ -117,7 +117,7 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
   const [wantBacking] = useState(true);
   // AI backing (clean, may need a head start) or fast backing (classic cut: starts at once, duller)
   // high-quality AI for the backing (a second step: it can mean a long wait); else the light AI
-  const [hq, setHq] = useState(() => Number(localStorage.getItem('urktv.aiSpeed')) >= 1.3);
+  const [hq, setHq] = useState(false); // never by itself: pressing start must mean singing at once
   // the guide vocal: the original kept faintly under the backing, at the singer's own level
   const [guideLvl, setGuideLvl] = useState(() => Number(localStorage.getItem('urktv.guide')) || 0.25);
   const [hqAsk, setHqAsk] = useState(false);
@@ -401,9 +401,6 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
         tr.seek(tr.time(), true);
       }
       if (st?.mode === 'ai' && (st.speed ?? 0) > 0) localStorage.setItem('urktv.aiSpeed', String(st.speed));
-      // how fast the high-quality model runs here, measured in the background: decides the next song's default
-      const bg = Number((st?.diag as any)?.hq?.bg) || 0;
-      if (bg > 0) localStorage.setItem('urktv.aiSpeed', String(bg));
       if (tr.duration()) songDur.current = tr.duration();
       const left = Math.max(0, (tr.duration() || 300) - tr.time());
       // the lead runs as far ahead as the chosen model needs
@@ -525,7 +522,7 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
       `主畫面：${tr instanceof DualTransport ? `${tr.main.playing() ? '播放中' : '沒在播'} ${fmt2(tr.main.time())} 秒${tr.syncing() ? '（等待同步）' : ''}` : '-'}`,
       `擷取：${ext.tap === 'connected' ? '已接上' : ext.tap === 'blocked' ? '被瀏覽器擋住' : '還沒接上'}`,
       `引擎：${ext.status?.state ?? '-'} / ${ext.status?.mode ?? '-'}，速度 ${fmt2(ext.status?.speed)} 倍，領先 ${fmt2(ext.status?.buffered)} 秒`,
-      d.hq ? `高品質伴奏（存在這台電腦）：已存 ${(d.hq as any).have}／${(d.hq as any).dur} 秒，這次用了 ${(d.hq as any).used} 秒，背景速度 ${fmt2((d.hq as any).bg)} 倍` : '',
+      d.hq ? `乾淨伴奏（存在這台電腦）：已存 ${(d.hq as any).have}／${(d.hq as any).dur} 秒，這次用了 ${(d.hq as any).used} 秒，背景速度 ${fmt2((d.hq as any).bg)} 倍` : '',
       `收到聲音 ${d.blocks ?? '-'} 段（最後 ${fmt2(d.lastTap)} 秒），待播 ${d.segments ?? '-'} 段，已播 ${d.played ?? '-'} 段，重來 ${d.resets ?? '-'} 次`,
       d.ep ? `高品質模型跑在：${d.ep === 'wasm' ? 'CPU' : '顯示卡'}（實測 ${Object.entries(d.epTimes ?? {}).map(([k, v]) => `${k === 'wasm' ? 'CPU' : '顯示卡'} ${v}ms`).join('、') || '已記住'}）` : '',
       `引擎時鐘 ${fmt2(d.clock)} 秒（${d.playing ? '播放中' : '暫停'}），音訊 ${d.ctx ?? '-'}${d.err ? '，錯誤：' + d.err : ''}${ext.status?.message ? '，訊息：' + ext.status.message : ''}`,
@@ -858,7 +855,7 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
     const md = MODELS.kara2;
     // the video and its length: the high-quality backing worked out here is kept on this computer per video
     const vid = ytCat ? live.current.layered?.video?.id : song.id;
-    return { type: 'start', lead: LEAD, vocal: vocalRef.current, mode: engineMode(), modelUrl: MODEL_BASE + md.file, ortBase: ORT_BASE, model: 'kara2', liteBase: MODEL_BASE, video: vid, dur: transport.current?.duration() || 0, bgAlways: /[?&]bgalways\b/.test(location.search) };
+    return { type: 'start', lead: LEAD, vocal: vocalRef.current, mode: engineMode(), modelUrl: MODEL_BASE + md.file, ortBase: ORT_BASE, model: 'kara2', liteBase: MODEL_BASE, bgUrl: MODEL_BASE + MODELS.mid.file, bgModel: 'mid', video: vid, dur: transport.current?.duration() || 0, bgAlways: /[?&]bgalways\b/.test(location.search) };
   };
   /** How far ahead the lead player should run, and how much backing to have before (re)starting. */
   const plan = (left: number) => {
@@ -1457,8 +1454,8 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
                     if (!h || !(h.dur > 0)) return null;
                     const pct = Math.min(100, Math.round((h.have / h.dur) * 100));
                     return (
-                      <small className="hq-kept" title="高品質伴奏是這台電腦自己算的，只存在這台電腦，不會上傳">
-                        {pct >= 97 ? '✨ 這首的高品質伴奏已存在這台電腦，之後一開就有' : h.used > 0 ? `✨ 正在用這台電腦存好的高品質伴奏（已存 ${pct}%）` : pct > 0 ? `✨ 背景準備高品質伴奏 ${pct}%（存在這台電腦，下次直接用）` : ''}
+                      <small className="hq-kept" title="更乾淨的伴奏是這台電腦自己算的，只存在這台電腦，不會上傳">
+                        {pct >= 97 ? '✨ 這首的乾淨伴奏已存在這台電腦，之後一開就有' : h.used > 0 ? `✨ 正在用這台電腦存好的乾淨伴奏（已存 ${pct}%）` : pct > 0 ? `✨ 邊唱邊在背景準備更乾淨的伴奏 ${pct}%（存在這台電腦，下次直接用）` : ''}
                       </small>
                     );
                   })()}

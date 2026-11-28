@@ -285,11 +285,11 @@ function classic(l: Float32Array, r: Float32Array) {
 
 const aiWait = new Map<number, { ok: (d: Float32Array) => void; bad: (e: Error) => void }>();
 let aiId = 0;
-function aiRun(spec: Float32Array, dims: number[]): Promise<Float32Array> {
+function aiRun(spec: Float32Array, dims: number[], w: Worker = S.session!): Promise<Float32Array> {
   const id = ++aiId;
   return new Promise((ok, bad) => {
     aiWait.set(id, { ok, bad });
-    S.session!.postMessage({ type: 'run', id, spec, dims }, [spec.buffer]);
+    w.postMessage({ type: 'run', id, spec, dims }, [spec.buffer]);
   });
 }
 
@@ -485,7 +485,7 @@ async function liteStep(): Promise<boolean | 'stale'> {
   return true;
 }
 
-async function loadModel(url: string, base: string, key: string) {
+async function loadModel(url: string, base: string, key: string, bg = false) {
   void base;
   let res = await fetch(url);
   let bytes: ArrayBuffer;
@@ -510,8 +510,10 @@ async function loadModel(url: string, base: string, key: string) {
     w.onmessage = (e) => {
       if (e.data.type !== 'ready') return bad(new Error(e.data.message));
       if (!remembered && e.data.ep) localStorage.setItem('ep.' + key, e.data.ep);
-      S.ep = e.data.ep;
-      S.epTimes = e.data.times ?? {};
+      if (!bg) {
+        S.ep = e.data.ep;
+        S.epTimes = e.data.times ?? {};
+      } else B.ep = e.data.ep;
       ok();
     };
     w.onerror = (e) => bad(new Error(e.message || 'AI worker failed'));
@@ -522,7 +524,8 @@ async function loadModel(url: string, base: string, key: string) {
         eps,
         probe: eps.length > 1 ? [1, 4, cfg0.dimF, cfg0.dimT] : undefined,
         wasmPaths: chrome.runtime.getURL('ort/'),
-        threads: Math.max(1, Math.min(16, (navigator.hardwareConcurrency || 2) - 1)),
+        // the background model leaves room for the live one
+        threads: bg ? Math.max(1, Math.min(6, (navigator.hardwareConcurrency || 2) - 2)) : Math.max(1, Math.min(16, (navigator.hardwareConcurrency || 2) - 1)),
       },
       [bytes],
     );
@@ -534,6 +537,12 @@ async function loadModel(url: string, base: string, key: string) {
     if (e.data.type === 'out') p.ok(e.data.data);
     else p.bad(new Error(e.data.message));
   };
+  if (bg) {
+    B.session = w;
+    B.cfg = MODELS[key];
+    B.sp = new _Spectral(B.cfg);
+    return;
+  }
   S.session = w;
   S.cfg = MODELS[key];
   S.sp = new _Spectral(S.cfg);
@@ -638,13 +647,17 @@ async function work() {
   }
 }
 
-// --- the high-quality backing, kept on this computer ---
-// While the light AI plays live, the high-quality model goes over the same sound in the background
+// --- the cleaner backing, kept on this computer ---
+// While the light AI plays live, the mid-weight model (MODELS.mid) goes over the same sound in the background
 // (only with CPU to spare) and its backing + vocal are kept in this browser's storage, per video.
 // Next time the kept parts are played straight away: no waiting, whatever the computer's speed.
 let K: Stems | null = null;
 const KS = { used: 0, savedAt: 0, savedHave: 0, saving: false };
-const B = { busy: false, pos: 0, gen: -1, speed: 0, url: '', ort: '', model: '', failed: false, always: false, since: 0 };
+const B = {
+  busy: false, pos: 0, gen: -1, speed: 0, url: '', ort: '', model: '', failed: false, always: false, since: 0, loading: false, ep: '',
+  // its own model (the mid-weight one) in its own worker: the singer's chosen live model is left alone
+  session: null as Worker | null, cfg: null as (MdxConfig & { file: string }) | null, sp: null as _Spectral | null,
+};
 
 async function openStems(video: string, dur: number) {
   if (K && K.video === video) return;
@@ -683,12 +696,17 @@ async function bgStep() {
   if (!B.always && S.clock.playing && (S.speed < 1.6 || ahead < 1)) return;
   B.busy = true;
   try {
-    if (!S.session) {
-      if (S.loadingModel) return;
-      await loadModel(B.url, B.ort, B.model);
+    if (!B.session) {
+      if (B.loading) return;
+      B.loading = true;
+      try {
+        await loadModel(B.url, B.ort, B.model, true);
+      } finally {
+        B.loading = false;
+      }
     }
-    const cfg = S.cfg!;
-    const sp = S.sp!;
+    const cfg = B.cfg!;
+    const sp = B.sp!;
     const chunk = sp.chunk;
     const trim = cfg.nFft / 2;
     const gen = chunk - 2 * trim;
@@ -715,7 +733,7 @@ async function bgStep() {
     const t1 = performance.now();
     sp.stft([wl, wr], spec);
     const gen0 = S.resets;
-    const out = await aiRun(spec, [1, 4, cfg.dimF, cfg.dimT]);
+    const out = await aiRun(spec, [1, 4, cfg.dimF, cfg.dimT], B.session!);
     if (gen0 !== S.resets || !K) return;
     const [yl, yr] = sp.istft(out);
     B.speed = gen / RATE / ((performance.now() - t1) / 1000);
@@ -794,7 +812,7 @@ setInterval(() => {
     }
     toPage({
       type: 'status', state: S.loadingModel ? 'loading' : 'running', mode: S.using, speed: S.speed, buffered: ahead,
-      diag: { hq: K ? { have: Math.round(K.haveSecs()), dur: Math.round(K.dur), used: Math.round(KS.used), bg: Math.round(B.speed * 100) / 100, kept: Math.round(KS.savedHave) } : null, ep: S.ep, epTimes: S.epTimes, blocks: S.blocks, lastTap: S.lastTap, segments: S.segs.length, played: S.played, resets: S.resets, clock: S.clock.t, playing: S.clock.playing, ctx: ctx.state, err: S.lastError },
+      diag: { hq: K ? { have: Math.round(K.haveSecs()), dur: Math.round(K.dur), used: Math.round(KS.used), bg: Math.round(B.speed * 100) / 100, bgEp: B.ep, kept: Math.round(KS.savedHave) } : null, ep: S.ep, epTimes: S.epTimes, blocks: S.blocks, lastTap: S.lastTap, segments: S.segs.length, played: S.played, resets: S.resets, clock: S.clock.t, playing: S.clock.playing, ctx: ctx.state, err: S.lastError },
     });
   }
 }, 250);
@@ -857,9 +875,9 @@ chrome.runtime.onMessage.addListener((m: any, _s: unknown, reply: (x: unknown) =
     P = newP();
     PB = newP();
     const sm = msg as any;
-    B.url = sm.modelUrl ?? '';
+    B.url = sm.bgUrl ?? '';
     B.ort = sm.ortBase ?? '';
-    B.model = sm.model ?? '';
+    B.model = sm.bgModel ?? '';
     B.failed = false;
     B.always = !!sm.bgAlways;
     B.since = performance.now();

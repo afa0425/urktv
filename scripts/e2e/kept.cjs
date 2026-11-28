@@ -8,7 +8,7 @@ const { chromium } = require('playwright');
   ctx.serviceWorkers()[0] || await ctx.waitForEvent('serviceworker', { timeout: 15000 });
   await ctx.grantPermissions(['microphone'], { origin: 'http://localhost:4173' });
   const errs = [];
-  const diag = async (p) => { await p.locator('details.diag summary').click().catch(() => {}); const d = await p.locator('.diag-pre').innerText().catch(() => ''); await p.locator('details.diag summary').click().catch(() => {}); return d.split('\n').filter((l) => /高品質伴奏|引擎|錯誤/.test(l)).join(' | '); };
+  const diag = async (p) => { await p.locator('details.diag summary').click().catch(() => {}); const d = await p.locator('.diag-pre').innerText().catch(() => ''); await p.locator('details.diag summary').click().catch(() => {}); return d.split('\n').filter((l) => /伴奏|引擎|錯誤/.test(l)).join(' | '); };
   for (const round of [1, 2]) {
     const p = await ctx.newPage();
     p.on('pageerror', e => errs.push(e.message));

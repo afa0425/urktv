@@ -8,7 +8,7 @@ export const EXT = 'urktv-ext';
 export type PageMsg =
   | { type: 'hello' }
   | { type: 'consent'; ok: boolean }
-  | { type: 'start'; lead: number; vocal: number; mode: 'auto' | 'ai' | 'lite' | 'classic'; modelUrl: string; ortBase: string; model: string; liteBase?: string; video?: string; dur?: number; bgAlways?: boolean }
+  | { type: 'start'; lead: number; vocal: number; mode: 'auto' | 'ai' | 'lite' | 'classic'; modelUrl: string; ortBase: string; model: string; liteBase?: string; video?: string; dur?: number; bgAlways?: boolean; bgUrl?: string; bgModel?: string }
   | { type: 'clock'; t: number; playing: boolean } // main (visible, muted) player's time
   | { type: 'vocal'; level: number }
   | { type: 'stop' };

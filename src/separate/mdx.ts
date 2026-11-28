@@ -14,6 +14,9 @@ export interface MdxConfig {
 export const MODELS: Record<string, MdxConfig & { file: string; label: string }> = {
   inst_hq3: { file: 'UVR-MDX-NET-Inst_HQ_3.onnx', label: 'Inst HQ 3', nFft: 6144, dimF: 3072, dimT: 256, hop: 1024, compensate: 1.022, primary: 'instrumental' },
   kim_vocal2: { file: 'Kim_Vocal_2.onnx', label: 'Kim Vocal 2', nFft: 7680, dimF: 3072, dimT: 256, hop: 1024, compensate: 1.009, primary: 'vocals' },
+  // mid-weight: half the work of the two above; on the MUSDB 7 s samples its backing scored about 3 dB
+  // above the light AI (Spleeter). Removes every voice, harmonies too.
+  mid: { file: 'UVR_MDXNET_9482.onnx', label: 'MDX 9482', nFft: 6144, dimF: 2048, dimT: 256, hop: 1024, compensate: 1.035, primary: 'vocals' },
   kara2: { file: 'UVR_MDXNET_KARA_2.onnx', label: 'Karaoke 2', nFft: 5120, dimF: 2048, dimT: 256, hop: 1024, compensate: 1.065, primary: 'instrumental' },
 };
 
