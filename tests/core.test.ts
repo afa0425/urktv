@@ -159,7 +159,11 @@ describe('scoring', () => {
     };
     const steady = run((t) => 60 + (Math.floor(t / 2) % 5) * 2);
     const wobbly = run((t) => 60.5 + 3 * Math.sin(t * 40));
-    expect(steady).toBeGreaterThan(80);
+    // (without a melody to compare with, free scoring never reaches the top grades: 79 at most)
+    expect(steady).toBeGreaterThan(70);
+    expect(steady).toBeLessThanOrEqual(79);
+    // one held note is steady and long, but it is not a song
+    expect(run(() => 65)).toBeLessThan(65);
     expect(wobbly).toBeLessThan(steady - 25);
     expect(run(() => null)).toBe(0);
   });

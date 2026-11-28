@@ -225,7 +225,10 @@ export class FreeScorer extends Base {
     const c = this.compute();
     // Until there is some singing to judge, do not show a number that jumps around.
     if (this.voicedSec < 2) return 0;
-    return 100 * (0.4 * c.inTune + 0.25 * c.coverage + 0.25 * c.sustain + 0.1 * c.range);
+    // With no melody to compare with, nobody can say the song was sung right: one held note is steady,
+    // long and "in tune" too. So a narrow range holds the score down, and it never reaches the top grades.
+    const raw = 100 * (0.4 * c.inTune + 0.25 * c.coverage + 0.25 * c.sustain + 0.1 * c.range);
+    return Math.min(79, raw * (0.55 + 0.45 * c.range));
   }
 
   result(): ScoreResult {

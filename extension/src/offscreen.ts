@@ -70,6 +70,7 @@ const S = {
   segs: [] as Seg[],
   clock: { t: 0, at: 0, playing: false },
   speed: 0,
+  cost: 2.5, // seconds one run of the clean model takes here (smoothed)
   busy: false,
   loadingModel: false,
   // diagnostics
@@ -504,7 +505,17 @@ async function loadModel(url: string, base: string, key: string, bg = false) {
   }
   // which runs this model faster here, graphics card or CPU: measured once, remembered
   const remembered = localStorage.getItem('ep.' + key);
-  const eps = remembered ? [remembered] : 'gpu' in navigator ? ['webgpu', 'wasm'] : ['wasm'];
+  // no real graphics adapter (most office computers' browsers, virtual machines): the CPU, without
+  // spending seconds on finding that out the hard way
+  let gpu = false;
+  if (!remembered) {
+    try {
+      gpu = !!(await (navigator as any).gpu?.requestAdapter({ powerPreference: 'high-performance' }));
+    } catch {
+      gpu = false;
+    }
+  }
+  const eps = remembered ? [remembered] : gpu ? ['webgpu', 'wasm'] : ['wasm'];
   const cfg0 = MODELS[key];
   const w = new Worker(chrome.runtime.getURL('aiworker.js'), { type: 'module' });
   await new Promise<void>((ok, bad) => {
@@ -593,8 +604,31 @@ async function work() {
       const chunk = sp.chunk;
       const trim = cfg.nFft / 2;
       const gen = chunk - 2 * trim;
-      if (S.len < S.done + gen + trim) break;
-      const a = S.done - trim;
+      // kept from another day (or from the head start): no work at all
+      const KL = RATE * 2;
+      if (K && S.len >= S.done + KL) {
+        const kept = K.get(Math.round(S.t0 * RATE) + S.done, KL);
+        if (kept) {
+          const t = S.t0 + S.done / RATE;
+          S.segs.push({ t, inst: kept.inst, voc: kept.voc, clean: true });
+          pitchFeed(t, kept.voc, kept.inst, 2);
+          S.done += KL;
+          KS.used += 2;
+          continue;
+        }
+      }
+      let a = S.done - trim;
+      let outLen = gen;
+      if (S.len < S.done + gen + trim) {
+        // not a whole window of new sound yet: wait while there is backing in hand; when the picture
+        // is about to run out (and at the very start), work on the newest sound there is
+        const avail = S.len - trim - S.done;
+        const inHand = S.t0 + S.done / RATE - nowMedia();
+        if (avail < RATE * 1.5 || inHand > S.cost * 1.6 + 1.5) break;
+        a = S.len - chunk;
+        outLen = avail;
+      }
+      const o = S.done - a;
       const win = (X: Float32Array) => {
         const w = new Float32Array(chunk);
         for (let i = 0; i < chunk; i++) {
@@ -626,15 +660,16 @@ async function work() {
       const [yl, yr] = sp.istft(out);
       const secs = (performance.now() - t1) / 1000;
       S.speed = gen / RATE / secs;
-      const prim = [yl.subarray(trim, trim + gen), yr.subarray(trim, trim + gen)].map((c) => c.map((v) => v * cfg.compensate));
-      const mix = [wl.subarray(trim, trim + gen), wr.subarray(trim, trim + gen)];
+      S.cost = S.cost * 0.5 + secs * 0.5;
+      const prim = [yl.subarray(o, o + outLen), yr.subarray(o, o + outLen)].map((c) => c.map((v) => v * cfg.compensate));
+      const mix = [wl.subarray(o, o + outLen), wr.subarray(o, o + outLen)];
       const other = mix.map((m, c) => m.map((v, i) => v - prim[c][i]));
       const inst = cfg.primary === 'instrumental' ? prim : other;
       const voc = cfg.primary === 'instrumental' ? other : prim;
       S.segs.push({ t: S.t0 + S.done / RATE, inst, voc, clean: true });
       pitchFeed(S.t0 + S.done / RATE, voc, inst, 2);
       K?.put(Math.round(S.t0 * RATE) + S.done, inst, voc);
-      S.done += gen;
+      S.done += outLen;
       if (S.mode === 'auto' && S.speed < 1.05) {
         S.using = 'classic'; // this computer cannot keep up: fall back
         toPage({ type: 'status', state: 'fallback', mode: 'classic', speed: S.speed });
@@ -971,6 +1006,16 @@ function startLite(base: string) {
     .catch((e) => toPage({ type: 'status', state: 'fallback', mode: 'classic', message: 'light AI: ' + String(e?.message ?? e) }));
 }
 
+/** The clean model, loaded once (the song page asks for it early; the start waits for that same load). */
+let mainLoad: Promise<void> | null = null;
+function mainModel(url: string, base: string, key: string): Promise<void> {
+  if (S.session && S.cfg === MODELS[key]) return Promise.resolve();
+  if (!mainLoad) {
+    mainLoad = loadModel(url, base, key).finally(() => (mainLoad = null));
+  }
+  return mainLoad;
+}
+
 let lostAt = 0;
 chrome.runtime.onMessage.addListener((m: any, _s: unknown, reply: (x: unknown) => void) => {
   if (m?.to === 'engine-diag') {
@@ -1019,11 +1064,27 @@ chrome.runtime.onMessage.addListener((m: any, _s: unknown, reply: (x: unknown) =
       S.using = 'classic'; // until the model is ready
       toPage({ type: 'status', state: 'loading' });
       S.loadingModel = true;
-      (S.session ? Promise.resolve() : loadModel(msg.modelUrl, msg.ortBase, msg.model))
+      mainModel(msg.modelUrl, msg.ortBase, msg.model)
         .finally(() => (S.loadingModel = false))
         .then(() => {
+          if (S.mode !== 'ai') return;
+          // everything from where the picture is: what the stop-gap cut made in the meantime is dropped
+          const from = Math.max(0, Math.round((nowMedia() - S.t0) * RATE) + (S.clock.playing ? Math.round(RATE * 0.6) : 0));
+          const tf = S.t0 + from / RATE;
+          S.segs = S.segs.filter((sg) => {
+            if (sg.t + sg.inst[0].length / RATE <= tf) return true;
+            sg.src?.forEach((x) => {
+              try {
+                x.stop();
+              } catch {
+                /* not started */
+              }
+            });
+            return false;
+          });
+          S.done = Math.min(from, S.len);
           S.using = 'ai';
-          S.done = Math.max(0, S.len - (S.cfg!.nFft / 2)); // continue from here with the model
+          void work();
         })
         .catch((e) => toPage({ type: 'status', state: 'fallback', mode: 'classic', message: String(e?.message ?? e) }));
     }
@@ -1035,6 +1096,8 @@ chrome.runtime.onMessage.addListener((m: any, _s: unknown, reply: (x: unknown) =
         .catch(() => {})
         .finally(() => (S.liteLoading = false));
     }
+    const pm = msg as any;
+    if (pm.modelUrl && pm.model) void mainModel(pm.modelUrl, pm.ortBase ?? '', pm.model).catch(() => {});
   } else if (msg.type === 'clock' && !S.running) {
     // the page is singing but this engine never got a start (Chrome reopened it): ask for one
     if (performance.now() - lostAt > 1000) {
@@ -1051,8 +1114,31 @@ chrome.runtime.onMessage.addListener((m: any, _s: unknown, reply: (x: unknown) =
     const m = mm.mode as 'ai' | 'lite' | 'classic';
     S.mode = m;
     if (m === 'lite') {
-      if (S.using === 'ai') {
+      if (S.using === 'ai' || (S.using === 'classic' && S.loadingModel)) {
+        // the clean model cannot keep up here: the light one carries on from where the clean
+        // backing ends (or from the picture, if there is none yet), not from the newest sound
+        const was = S.using;
         aiAbort(true);
+        const from = was === 'ai' ? S.done : Math.max(0, Math.round((nowMedia() - S.t0) * RATE));
+        if (S.lite) {
+          const tf = S.t0 + from / RATE;
+          S.segs = S.segs.filter((sg) => {
+            if (sg.t + sg.inst[0].length / RATE <= tf + 0.01 || sg.clean) return true;
+            sg.src?.forEach((x) => {
+              try {
+                x.stop();
+              } catch {
+                /* not started */
+              }
+            });
+            return false;
+          });
+          S.lf = Math.ceil(Math.min(from, S.len) / LH);
+          S.done = S.lf * LH;
+          S.using = 'lite';
+          void work();
+          return;
+        }
         S.using = 'classic';
         S.done = S.len;
       }
@@ -1073,11 +1159,11 @@ chrome.runtime.onMessage.addListener((m: any, _s: unknown, reply: (x: unknown) =
         S.using = 'ai';
         S.done = Math.max(0, S.len - S.cfg!.nFft / 2);
       };
-      if (S.session) go();
+      if (S.session && S.cfg === MODELS[mm.model]) go();
       else if (!S.loadingModel && mm.modelUrl) {
         S.loadingModel = true;
         toPage({ type: 'status', state: 'loading' });
-        loadModel(mm.modelUrl, mm.ortBase, mm.model)
+        mainModel(mm.modelUrl, mm.ortBase, mm.model)
           .finally(() => (S.loadingModel = false))
           .then(go)
           .catch((e) => toPage({ type: 'status', state: 'fallback', mode: 'classic', message: String(e?.message ?? e) }));

@@ -2799,3 +2799,106 @@ a.btn {
 @media (prefers-reduced-motion: reduce) {
   .ktv-flash { animation: none; }
 }
+
+/* ---------- the result: a reveal, not a receipt ---------- */
+.confetti {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 50;
+  pointer-events: none;
+}
+.result.r2 {
+  position: relative;
+  text-align: center;
+  padding-top: 28px;
+}
+.result.r2::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(700px 420px at 50% 26%, rgba(255, 92, 138, 0.32), transparent 70%), radial-gradient(900px 500px at 50% 0%, rgba(120, 90, 255, 0.3), transparent 70%);
+  animation: r2Glow 3.2s ease-in-out infinite alternate;
+}
+.result.r2.top::before {
+  background: radial-gradient(700px 420px at 50% 26%, rgba(255, 213, 74, 0.36), transparent 70%), radial-gradient(900px 500px at 50% 0%, rgba(255, 92, 138, 0.3), transparent 70%);
+}
+@keyframes r2Glow {
+  from { opacity: 0.65; }
+  to { opacity: 1; }
+}
+.result.r2 .result-song {
+  font-size: 1.15rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+.result.r2 .result-score {
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 14px;
+  margin: 18px 0 6px;
+}
+.result.r2 .score-num.huge {
+  font-size: clamp(5.5rem, 16vw, 9.5rem);
+  line-height: 0.95;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  background: linear-gradient(180deg, #fff 10%, #ffd9a0 55%, #ff5c8a 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 10px 40px rgba(255, 92, 138, 0.55));
+}
+.result.r2.top .score-num.huge {
+  background: linear-gradient(180deg, #fff 10%, #ffe27a 50%, #ffa63d 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  filter: drop-shadow(0 10px 44px rgba(255, 200, 70, 0.7));
+}
+.result.r2 .score-unit {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--muted);
+  padding-bottom: 16px;
+}
+.result.r2 .grade {
+  align-self: center;
+  min-width: 84px;
+  padding: 8px 18px;
+  border-radius: 20px;
+  font-size: 2.6rem;
+  font-weight: 900;
+  font-style: italic;
+  color: #1a0f16;
+  background: linear-gradient(135deg, #fff1a8, #ffb347);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.25), 0 14px 40px -8px rgba(255, 179, 71, 0.8);
+  transform: rotate(-6deg);
+  animation: gradeIn 0.6s 1.3s cubic-bezier(0.2, 1.6, 0.4, 1) both;
+}
+@keyframes gradeIn {
+  from { opacity: 0; transform: rotate(-24deg) scale(2.6); }
+}
+.result.r2 .stage-name {
+  justify-content: center;
+  font-size: 1.15rem;
+  animation: r2Up 0.5s 1.6s ease-out both;
+}
+.result.r2 .best {
+  animation: r2Up 0.5s 1.9s ease-out both;
+}
+@keyframes r2Up {
+  from { opacity: 0; transform: translateY(12px); }
+}
+.result.r2 .card {
+  text-align: left;
+}
+@media (prefers-reduced-motion: reduce) {
+  .result.r2 .grade,
+  .result.r2 .stage-name,
+  .result.r2 .best,
+  .result.r2::before { animation: none; }
+}

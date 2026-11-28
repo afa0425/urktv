@@ -88,7 +88,12 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
   const newCoach = () => ({ idx: 0, combo: 0, max: 0, highHit: new Set<number>(), lines: new Map<number, number>(), lastHint: 0, lastPraise: 0, lastHigh: 0 });
   const coach = useRef(newCoach());
   // live gray bars (made by the extension): which notes were judged, how high the song goes
-  const liveJudge = useRef({ done: new Set<number>(), run: 0, mids: new Map<number, number>() });
+  const liveJudge = useRef({ done: new Set<number>(), run: 0, mids: new Map<number, number>(), w: 0, h: 0, n: 0 });
+  /** Score from the live bars: the share of the melody (by length) sung on pitch. Null until enough was judged. */
+  const barScore = () => {
+    const J = liveJudge.current;
+    return J.n >= 3 && J.w > 0 ? 100 * Math.pow(J.h / J.w, 0.8) : null;
+  };
   const [pops, setPops] = useState<{ id: number; text: string; kind: string }[]>([]);
   const [combo, setCombo] = useState(0);
   const popId = useRef(0);
@@ -99,6 +104,8 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
   // nothing but the song: the side column goes under the stage, the browser goes full screen
   const [focus, setFocus] = useState(false);
   const [tools, setTools] = useState(false);
+  /** The basic backing is in use (the clean model cannot keep up on this computer). */
+  const [basic, setBasic] = useState(false);
   const toggleFocus = () => {
     const on = !focus;
     setFocus(on);
@@ -144,15 +151,11 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
   const [wantBacking] = useState(true);
   // AI backing (clean, may need a head start) or fast backing (classic cut: starts at once, duller)
   // high-quality AI for the backing (a second step: it can mean a long wait); else the light AI
-  const [hq, setHq] = useState(false); // never by itself: pressing start must mean singing at once
   // the guide vocal: the original kept faintly under the backing, at the singer's own level
   const [guideLvl, setGuideLvl] = useState(() => Number(localStorage.getItem('urktv.guide')) || 0.25);
-  const [hqAsk, setHqAsk] = useState(false);
   const [laneMsg, setLaneMsg] = useState('');
   const laneMsgRef = useRef('');
   const [voiceFx, setVoiceFx] = useState(0); // voice changer for the monitor (semitones) // high quality is a second step: it can mean a long wait
-  const hqRef = useRef(hq);
-  hqRef.current = hq;
   // any YouTube song can get the live backing track: library songs, and links pasted on Home
   const ytPlain = !own && !isDemo;
   const ytAny = ytCat || ytPlain;
@@ -165,7 +168,7 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
   }, [ext.present, ext.consent]);
   // get the light AI ready while the singer looks at the page (it is then instant on start)
   useEffect(() => {
-    if (backing) extPost({ type: 'preload', liteBase: MODEL_BASE, bgUrl: MODEL_BASE + MODELS.mid.file, bgModel: 'mid', ortBase: ORT_BASE });
+    if (backing) extPost({ type: 'preload', liteBase: MODEL_BASE, modelUrl: MODEL_BASE + MODELS.mid.file, model: 'mid', ortBase: ORT_BASE });
   }, [backing]);
   const [backingFailed, setBackingFailed] = useState(false);
   const [drag, setDrag] = useState<number | null>(null);
@@ -265,6 +268,7 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
     if (!ytPlain) return;
     void loadPitch(song.id).then((c) => c && liveNotes.current.restore(c));
     if (/[?&]debug\b/.test(location.search)) (window as any).urktvLive = liveNotes.current;
+    if (/[?&]debug\b/.test(location.search)) (window as any).urktvJudge = () => ({ ...liveJudge.current, done: liveJudge.current.done.size, mids: liveJudge.current.mids.size, trace: trace.current.length, sung: trace.current.filter((p) => p.midi !== null).length });
     const save = () => {
       const d = liveNotes.current.dump();
       if (d && d.data.length > 200) void savePitch(song.id, d);
@@ -313,11 +317,16 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
         if (!(tr.duration() || tr.lead.duration()) && ++tries < 40) return;
         if (tries >= 40) return window.clearInterval(id);
         prerolled.current = true;
-        extRef.current.fellBack = false;
+        extRef.current.fellBack = knownSlow();
+        setBasic(extRef.current.fellBack);
         extPost(startMsg());
         window.setTimeout(() => !tr.started && tr.lead.play(), 400);
         return;
       }
+      // the clean model's first runs show whether this computer can keep up with a song: if it
+      // clearly cannot, the basic backing is chosen now, before the singer presses start
+      const st = extRef.current.status;
+      if (st?.mode === 'ai' && (st.speed ?? 0) > 0 && st.speed! < 0.97 && !extRef.current.fellBack) useBasic(true);
       // far enough: the lead waits there for the singer
       if (!tr.started && tr.lead.time() >= PRE_MAX && tr.lead.playing()) tr.lead.pause();
     }, 250);
@@ -344,7 +353,7 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
     scorer.current = s;
     trace.current = [];
     coach.current = newCoach();
-    liveJudge.current = { done: new Set(), run: 0, mids: new Map() };
+    liveJudge.current = { done: new Set(), run: 0, mids: new Map(), w: 0, h: 0, n: 0 };
     lineJudge.current = { done: new Set(), stars: 0 };
     setStars(0);
     setCombo(0);
@@ -451,7 +460,8 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
     const id = window.setInterval(() => {
       const tr = transport.current;
       if (!(tr instanceof DualTransport)) return;
-      const st = extRef.current.status;
+      const e0 = extRef.current;
+      const st = e0.status;
       // the extension's engine was reopened by Chrome and knows nothing: start it again from here
       if (st?.state === 'lost' && tr.started && !tr.solo && performance.now() - lastRestart.current > 3000) {
         lastRestart.current = performance.now();
@@ -460,7 +470,15 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
         tr.main.pause();
         tr.seek(tr.time(), true);
       }
-      if (st?.mode === 'ai' && (st.speed ?? 0) > 0) localStorage.setItem('urktv.aiSpeed', String(st.speed));
+      if (st?.mode === 'ai' && (st.speed ?? 0) > 0) {
+        localStorage.setItem('urktv.midSpeed', String(st.speed));
+        // slower than the song for a while: this computer cannot run the clean model live. The basic
+        // backing takes over (the clean one is still worked out in the background and kept for next time)
+        if (st.speed! < 1.02 && tr.started && !e0.fellBack) {
+          if (!slowSince.current) slowSince.current = performance.now();
+          else if (performance.now() - slowSince.current > 7000) useBasic(true);
+        } else slowSince.current = 0;
+      }
       if (tr.duration()) songDur.current = tr.duration();
       const left = Math.max(0, (tr.duration() || 300) - tr.time());
       // the lead runs as far ahead as the chosen model needs
@@ -691,6 +709,12 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
     tr?.pause();
     mic.current.stop();
     const res = scorer.current.result();
+    // a song followed on live bars is scored on them (free scoring alone is far too kind)
+    const bs = barScore();
+    if (res.mode === 'free' && bs !== null) {
+      res.score = bs;
+      res.grade = gradeOf(bs);
+    }
     const ch = live.current.chart;
     if (res.mode === 'guide' && ch) res.extras = extras(ch);
     onDone(res, { id: song.id, title: live.current.title });
@@ -829,13 +853,20 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
           J.done.add(key);
           let tot = 0;
           let hit = 0;
+          let all = 0;
           for (const p of trace.current) {
-            if (p.t < n.start || p.t > n.end || p.midi === null) continue;
+            if (p.t < n.start || p.t > n.end) continue;
+            all++;
+            if (p.midi === null) continue;
             tot++;
             if (p.hit) hit++;
           }
           if (n.end - n.start < 0.25) continue; // too short to judge fairly
           const ratio = tot ? hit / tot : 0;
+          // the score: every note of the melody counts by its length, sung or not
+          J.w += n.end - n.start;
+          J.h += (n.end - n.start) * Math.min(1, (all ? hit / all : 0) / 0.7); // (on pitch for most of the note = full marks)
+          J.n++;
           if (ratio >= 0.5) {
             c.combo++;
             c.max = Math.max(c.max, c.combo);
@@ -949,7 +980,7 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
           setHowl(mic.current.howl);
         }
         setHud({
-          score: scorer.current.live(),
+          score: barScore() ?? (liveBars ? 0 : scorer.current.live()),
           note: frame.midi !== null ? midiName(frame.midi) : '',
           level: frame.level,
           time,
@@ -966,57 +997,46 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
     return () => cancelAnimationFrame(raf);
   }, [phase]);
 
-  /** This computer's AI speed (× real time): measured now, or remembered from last time. */
+  /** How fast the clean model runs here (× real time): measured now, or remembered. */
   const aiSpeed = () => {
     const st = extRef.current.status;
     if (st?.mode === 'ai' && (st.speed ?? 0) > 0) return st.speed!;
-    return Number(localStorage.getItem('urktv.aiSpeed')) || 0;
+    return Number(localStorage.getItem('urktv.midSpeed')) || 0;
   };
-  /** What the extension should run: the high-quality AI, or the light AI (original and fast backing). */
-  const engineMode = () => (hqRef.current && !extRef.current.fellBack ? 'ai' : 'lite');
+  /**
+   * What the extension runs live: the clean (mid-weight) model. The basic one only where the clean
+   * one cannot keep up with the song (a slow computer), or could not load.
+   */
+  const engineMode = () => (extRef.current.fellBack ? 'lite' : 'ai');
+  const slowSince = useRef(0);
+  /** This computer was too slow for the clean model the last time (looked at again after a week). */
+  const knownSlow = () => Date.now() - Number(localStorage.getItem('urktv.midSlow') || 0) < 7 * 86400e3;
+  const useBasic = (remember: boolean) => {
+    if (extRef.current.fellBack) return;
+    extRef.current.fellBack = true;
+    if (remember) localStorage.setItem('urktv.midSlow', String(Date.now()));
+    setBasic(true);
+    extPost({ ...startMsg(), type: 'setmode' });
+  };
   const startMsg = () => {
-    const md = MODELS.kara2;
-    // the video and its length: the high-quality backing worked out here is kept on this computer per video
+    const md = MODELS.mid;
+    // the video and its length: the backing worked out here is kept on this computer per video
     const vid = ytCat ? live.current.layered?.video?.id : song.id;
     const tr0 = transport.current;
-    return { type: 'start', lead: LEAD, vocal: vocalRef.current, mode: engineMode(), modelUrl: MODEL_BASE + md.file, ortBase: ORT_BASE, model: 'kara2', liteBase: MODEL_BASE, bgUrl: MODEL_BASE + MODELS.mid.file, bgModel: 'mid', video: vid, dur: tr0?.duration() || (tr0 instanceof DualTransport ? tr0.lead.duration() : 0) || 0, bgAlways: /[?&]bgalways\b/.test(location.search) };
+    return { type: 'start', lead: LEAD, vocal: vocalRef.current, mode: engineMode(), modelUrl: MODEL_BASE + md.file, ortBase: ORT_BASE, model: 'mid', liteBase: MODEL_BASE, bgUrl: MODEL_BASE + md.file, bgModel: 'mid', video: vid, dur: tr0?.duration() || (tr0 instanceof DualTransport ? tr0.lead.duration() : 0) || 0, bgAlways: /[?&]bgalways\b/.test(location.search) };
   };
   /** How far ahead the lead player should run, and how much backing to have before (re)starting. */
-  const plan = (left: number) => {
+  const plan = (_left: number) => {
     const st = extRef.current.status;
-    if (engineMode() === 'ai' && st?.mode !== 'lite') {
-      const n = aiNeed(aiSpeed() || 1, left);
-      return { ahead: n, resume: Math.min(n, 600) - 0.5 };
-    }
-    if (st?.mode === 'classic') return { ahead: 2, resume: 1.5 }; // light AI could not load
+    if (st?.mode === 'classic' && engineMode() === 'lite') return { ahead: 2, resume: 1.5 }; // nothing could load
     return { ahead: leadGap.current, resume: 2 };
   };
-  /** Seconds of AI backing to have ready so it lasts `left` seconds of song at speed sp. */
-  const aiNeed = (sp: number, left: number) => (sp >= 1.15 ? 8 : Math.min(600, left * (1 / sp - 1) + 8));
 
   /** Original 100 % / guide (the original faintly) / backing 0 %: only the vocal level changes. */
   const vocalPreset = (v: number) => {
     if (!backing) return;
     changeVocal(v);
   };
-  /** High quality on or off: the extension switches models; the picture waits for the new one. */
-  const setQuality = (on: boolean) => {
-    if (!backing) return;
-    const before = engineMode();
-    if (on) extRef.current.fellBack = false;
-    hqRef.current = on;
-    setHq(on);
-    const after = engineMode();
-    if (phase !== 'live' || before === after) return;
-    extPost({ ...startMsg(), type: 'setmode' });
-    const tr = transport.current;
-    if (tr instanceof DualTransport && tr.started) {
-      rebuffering.current = true;
-      tr.main.pause();
-      tr.seek(tr.time(), true);
-    }
-  };
-
   const start = async (withMic: boolean) => {
     setMicErr(null);
     if (withMic) {
@@ -1041,12 +1061,13 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
     const tr = transport.current;
     if (tr instanceof DualTransport) {
       // the lead player starts first and the chosen model gets its head start
-      if (prerolled.current && engineMode() === 'lite' && tr.lead.time() > 0.5) {
+      if (prerolled.current && tr.lead.time() > 0.5) {
         // it already did, while the singer looked at the page: keep that distance through the song
         leadGap.current = Math.max(LITE_AHEAD, Math.min(PRE_MAX + 1, tr.lead.time()));
       } else {
         if (prerolled.current) tr.lead.seek(0);
-        extRef.current.fellBack = false;
+        extRef.current.fellBack = knownSlow();
+        setBasic(extRef.current.fellBack);
         extPost(startMsg());
       }
       let started = false;
@@ -1055,22 +1076,21 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
         () => {
           started = true;
           setPrep(null);
+          // the distance the lead has now is the distance it keeps
+          leadGap.current = Math.max(LITE_AHEAD, Math.min(PRE_MAX + 1, tr.lead.time() - tr.main.time()));
+          tr.ahead = leadGap.current;
         },
         () => {
           const st = extRef.current.status;
           const waited = performance.now() - t0;
-          if (engineMode() === 'ai' && !(aiSpeed() > 0) && waited > 40000) {
-            // the AI never answered on this computer: the light AI, so the song can start
-            extRef.current.fellBack = true;
-            extPost({ ...startMsg(), type: 'setmode' });
-          }
-          // the light AI still loading: wait for it (a few seconds), not for the old cut
-          if (engineMode() === 'lite' && st?.mode !== 'lite' && waited < 15000 && !extRef.current.fellBack) return false;
-          if (engineMode() === 'ai' && st?.mode !== 'ai' && !(aiSpeed() > 0)) return false;
+          // the clean model never got going on this computer: the basic one, so the song can start
+          if (engineMode() === 'ai' && st?.mode !== 'ai' && waited > 30000) useBasic(false);
+          if (engineMode() === 'ai' && st?.mode === 'ai' && (st.speed ?? 0) > 0 && st.speed! < 0.97) useBasic(true);
+          if (engineMode() === 'lite' && st?.mode !== 'lite' && waited < 45000) return false;
+          if (engineMode() === 'ai' && st?.mode !== 'ai') return false;
           const pl = plan(tr.duration() || 300);
-          tr.ahead = pl.ahead;
-          // the light AI starts as soon as a little backing is ready; the AI needs its full head start
-          return (st?.buffered ?? 0) >= pl.resume && (engineMode() === 'lite' || tr.lead.time() >= Math.min(pl.ahead, 600) - 1);
+          // as soon as a little backing is ready
+          return (st?.buffered ?? 0) >= pl.resume;
         },
       );
       setPrep({ pct: null, label: '載入 AI 模型' });
@@ -1080,13 +1100,13 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
           return window.clearInterval(cd);
         }
         const st = extRef.current.status;
-        if (!st || st.state === 'loading' || (engineMode() === 'lite' && st.mode !== 'lite' && !extRef.current.fellBack)) {
+        if (!st || st.state === 'loading' || st.mode !== engineMode()) {
           setPrep({ pct: null, label: '載入 AI 模型（第一次要下載，之後很快）' });
           return;
         }
         const pl = plan(tr.duration() || 300);
         const b = Math.max(0, st.buffered ?? 0);
-        setPrep({ pct: (b / Math.max(0.5, pl.resume)) * 100, label: engineMode() === 'ai' ? '高品質 AI 正在分析這首歌' : 'AI 正在分析這首歌' });
+        setPrep({ pct: (b / Math.max(0.5, pl.resume)) * 100, label: 'AI 正在做這首歌的伴奏' });
       }, 250);
     } else tr?.play();
     setPhase('live');
@@ -1244,16 +1264,14 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
               <Prep
                 pct={prep.pct}
                 label={prep.label}
-                sub={hq && aiSpeed() > 0 && aiSpeed() < 1.15 ? `你的電腦算高品質 AI 是 ${aiSpeed().toFixed(1)} 倍速，所以要先多算一段` : undefined}
-                onFast={hq ? () => setQuality(false) : undefined}
               />
             )}
             {phase === 'live' && backing && !prep && hold !== null && (
               <Prep
                 pct={hold}
-                label={hq && !extRef.current.fellBack ? '高品質伴奏跟上中' : '伴奏跟上中'}
-                sub={hq && aiSpeed() > 0 && aiSpeed() < 1.15 ? `你的電腦算高品質 AI 是 ${aiSpeed().toFixed(1)} 倍速，比歌慢` : undefined}
-                onFast={hq ? () => setQuality(false) : undefined}
+                label="伴奏跟上中"
+                sub={!basic && aiSpeed() > 0 && aiSpeed() < 1.1 ? '這台電腦算得比歌慢，可以改用基本伴奏' : undefined}
+                onFast={!basic ? () => useBasic(true) : undefined}
               />
             )}
             {localErr && <div className="overlay error">{t('mine.missing')}</div>}
@@ -1434,19 +1452,6 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
                       </div>
                     </div>
                   )}
-                  {backing && (
-                    <div className="c-group">
-                      <span className="c-label">伴奏音質</span>
-                      <div className="c-seg" role="radiogroup" aria-label="去人聲品質">
-                        <button role="radio" aria-checked={!hq} className={!hq ? 'on' : ''} onClick={() => (setHqAsk(false), setQuality(false))}>
-                          一般
-                        </button>
-                        <button role="radio" aria-checked={hq} className={hq ? 'on' : ''} onClick={() => !hq && setHqAsk(true)}>
-                          高品質
-                        </button>
-                      </div>
-                    </div>
-                  )}
                   <div className="c-group c-end">
                     <details className="mixer">
                       <summary className="c-pill" title="音樂、耳機裡自己的聲音、殘響">
@@ -1565,30 +1570,6 @@ export function Stage({ song, nextTitle, onNext, onExit, onDone }: Props) {
                   )}
                 </div>
               )}
-            </div>
-          )}
-          {hqAsk && (
-            <div className="hq-ask">
-              <strong>✨ 高品質伴奏</strong>
-              <p className="small">
-                {(() => {
-                  const sp = aiSpeed();
-                  if (!sp) return '最乾淨的去人聲，但很吃顯示卡。這台電腦還沒測過：有獨立顯示卡幾秒就好，內建顯示卡可能要先等一兩分鐘。';
-                  if (sp >= 1.15) return `你的電腦算得夠快（${sp.toFixed(1)} 倍速），幾秒就能開始。`;
-                  return `你的電腦算這個是 ${sp.toFixed(1)} 倍速，比歌慢：開始前要先等約 ${Math.round(aiNeed(sp, hud.dur || 240))} 秒，中間可能還會停下來等。`;
-                })()}
-              </p>
-              <div className="row wrap">
-                <button className="btn primary small" onClick={() => (setHqAsk(false), setQuality(true))}>
-                  確定用高品質
-                </button>
-                <button className="btn small" onClick={() => setHqAsk(false)}>
-                  先不要，用一般伴奏
-                </button>
-                <a className="small" href="bench.html" target="_blank" rel="noopener">
-                  測我的電腦
-                </a>
-              </div>
             </div>
           )}
           {micErr && <p className="notice warn">{t(micErr)}</p>}

@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { playSfx } from '../audio/sfx';
 import { listMics } from '../audio/mic';
 import { midiName } from '../audio/pitch';
 import type { ScoreResult } from '../core/score';
@@ -82,13 +83,93 @@ function stageName(score: number): { icon: string; name: string; line: string } 
   return { icon: t.icon, name: t.name, line: t.lines[Math.floor(Math.random() * t.lines.length)] };
 }
 
+/** A number that runs up to its value (the score reveal). */
+function useCountUp(to: number, ms = 1400) {
+  const [v, setV] = useState(0);
+  useEffect(() => {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return setV(to);
+    const t0 = performance.now();
+    let raf = 0;
+    const step = (now: number) => {
+      const k = Math.min(1, (now - t0) / ms);
+      setV(Math.round(to * (1 - Math.pow(1 - k, 3))));
+      if (k < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [to, ms]);
+  return v;
+}
+
+/** Paper streamers over the whole page for a few seconds. */
+function Confetti({ gold }: { gold: boolean }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const cv = ref.current!;
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const ctx = cv.getContext('2d')!;
+    const dpr = window.devicePixelRatio || 1;
+    const W = (cv.width = innerWidth * dpr);
+    const H = (cv.height = innerHeight * dpr);
+    const cols = gold ? ['#ffd54a', '#fff1a8', '#ffb347', '#ff5c8a', '#ffffff'] : ['#ff5c8a', '#ffb347', '#8c64ff', '#46dcff', '#5df2b6'];
+    const ps = Array.from({ length: gold ? 220 : 140 }, () => ({
+      x: W / 2 + (Math.random() - 0.5) * W * 0.3,
+      y: H * 0.42,
+      vx: (Math.random() - 0.5) * 1500 * dpr,
+      vy: (-500 - Math.random() * 1100) * dpr,
+      w: (6 + Math.random() * 8) * dpr,
+      r: Math.random() * 6,
+      vr: (Math.random() - 0.5) * 14,
+      c: cols[Math.floor(Math.random() * cols.length)],
+    }));
+    let raf = 0;
+    let last = performance.now();
+    const t0 = last;
+    const tick = (now: number) => {
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      ctx.clearRect(0, 0, W, H);
+      const fade = Math.max(0, 1 - (now - t0 - 3200) / 1200);
+      for (const p of ps) {
+        p.vy += 1700 * dpr * dt;
+        p.vx *= 0.985;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.r += p.vr * dt;
+        ctx.save();
+        ctx.globalAlpha = fade;
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.r);
+        ctx.fillStyle = p.c;
+        ctx.fillRect(-p.w / 2, -p.w * 0.3, p.w, p.w * 0.6);
+        ctx.restore();
+      }
+      if (fade > 0) raf = requestAnimationFrame(tick);
+      else ctx.clearRect(0, 0, W, H);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [gold]);
+  return <canvas ref={ref} className="confetti" aria-hidden="true" />;
+}
+
 export function Result({ song, result, prevBest, next, onAgain, onNext, onHome }: ResultProps) {
   const t = useT();
   const none = result.voicedSec < 2;
   const score = Math.round(result.score);
   const isBest = !none && (prevBest === null || result.score > prevBest);
+  const shown = useCountUp(none ? 0 : score);
+  const party = !none && (score >= 60 || isBest);
+  // the crowd, once, for a song well sung
+  useEffect(() => {
+    if (!party) return;
+    const id = window.setTimeout(() => playSfx(score >= 85 ? 'cheer' : 'applause'), 900);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   return (
-    <div className="page result">
+    <div className={'page result r2' + (score >= 85 ? ' top' : '')}>
+      {party && <Confetti gold={score >= 85} />}
       <p className="label">{t('result.title')}</p>
       <h1 className="result-song">{song.title}</h1>
       {none ? (
@@ -97,7 +178,8 @@ export function Result({ song, result, prevBest, next, onAgain, onNext, onHome }
         <>
           <div className="result-score">
             <span className="grade">{result.grade}</span>
-            <span className="score-num huge">{score}</span>
+            <span className="score-num huge">{shown}</span>
+            <span className="score-unit">分</span>
           </div>
           {(() => {
             const sn = stageName(score);
